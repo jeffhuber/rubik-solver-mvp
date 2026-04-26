@@ -28,3 +28,10 @@ python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
 
 Railway should run this app through Docker. The container listens on `$PORT` when provided, with a local fallback of `8080`.
 
+Suggested Railway setup:
+
+1. Create a new Railway project.
+2. Choose "Deploy from GitHub repo" and select `jeffhuber/rubik-solver-mvp`.
+3. Railway should detect the root `Dockerfile`.
+4. The included `railway.json` sets the builder to Dockerfile and the healthcheck path to `/healthz`.
+5. Generate a public Railway domain after the first successful deploy.
