@@ -1,0 +1,2 @@
+"""Rubik Solver MVP package."""
+

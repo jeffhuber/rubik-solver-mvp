@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rubik Solver MVP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Rubik Solver MVP</p>
+          <h1>Flattened Net Solver</h1>
+        </div>
+        <div class="status-pill" id="statusPill">Ready</div>
+      </header>
+
+      <section class="workspace">
+        <div class="input-panel">
+          <div class="tabs" role="tablist" aria-label="Input mode">
+            <button class="tab is-active" id="uploadTab" type="button">Upload net</button>
+            <button class="tab" id="randomTab" type="button">Random scramble</button>
+          </div>
+
+          <div class="mode-panel is-active" id="uploadPanel">
+            <label class="file-drop">
+              <input id="netImage" type="file" accept="image/*">
+              <span>Choose a Ruwix-style flattened cube image</span>
+            </label>
+            <button class="primary-action" id="detectButton" type="button">Detect stickers</button>
+            <p class="hint">The parser expects the 12 by 9 unfolded cube net layout.</p>
+          </div>
+
+          <div class="mode-panel" id="randomPanel">
+            <label class="field-label" for="scrambleLength">Scramble length</label>
+            <input class="number-input" id="scrambleLength" type="number" min="1" max="80" value="20">
+            <button class="primary-action" id="randomButton" type="button">Generate scramble</button>
+            <div class="scramble-box" id="scrambleBox"></div>
+          </div>
+
+          <div class="palette" id="palette" aria-label="Sticker color palette"></div>
+          <div class="counts" id="counts"></div>
+          <button class="solve-action" id="solveButton" type="button" disabled>Solve reviewed state</button>
+        </div>
+
+        <div class="review-panel">
+          <div class="panel-heading">
+            <h2>Review</h2>
+            <span id="reviewMeta">No cube loaded</span>
+          </div>
+          <div class="cube-net" id="cubeNet"></div>
+        </div>
+
+        <div class="solution-panel">
+          <div class="panel-heading">
+            <h2>Solution</h2>
+            <span id="moveCount"></span>
+          </div>
+          <div class="moves" id="moves"></div>
+          <ol class="instructions" id="instructions"></ol>
+        </div>
+      </section>
+    </main>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  </body>
+</html>
