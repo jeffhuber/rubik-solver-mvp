@@ -1,9 +1,11 @@
 const FACE_ORDER = ["U", "R", "F", "D", "L", "B"];
 const DISPLAY_FACE_ORDER = ["U", "L", "F", "R", "B", "D"];
 const COLORS = ["white", "yellow", "red", "orange", "blue", "green"];
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 let reviewedFaces = null;
 let cubeFaces = null;
+let selectedNetFile = null;
 let selectedColor = "white";
 let solutionStates = [];
 let solutionMoves = [];
@@ -24,7 +26,12 @@ const scrambleBox = document.getElementById("scrambleBox");
 const stepper = document.getElementById("stepper");
 const stepLabel = document.getElementById("stepLabel");
 const stepMove = document.getElementById("stepMove");
+const detectButton = document.getElementById("detectButton");
+const fileDrop = document.getElementById("fileDrop");
 const fileLabel = document.getElementById("fileLabel");
+const netImage = document.getElementById("netImage");
+const uploadMeta = document.getElementById("uploadMeta");
+const validationBox = document.getElementById("validationBox");
 
 function cloneFaces(faces) {
   return JSON.parse(JSON.stringify(faces));
@@ -33,6 +40,49 @@ function cloneFaces(faces) {
 function setStatus(message, isError = false) {
   statusPill.textContent = message;
   statusPill.classList.toggle("is-error", isError);
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageFile(file) {
+  if (!file) return false;
+  if (file.type) return ["image/png", "image/jpeg"].includes(file.type);
+  return /\.(png|jpe?g)$/i.test(file.name || "");
+}
+
+function validateImageFile(file) {
+  if (!isImageFile(file)) {
+    throw new Error("Use a JPEG or PNG image.");
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error("Image is too large. Use a file under 8 MB.");
+  }
+}
+
+function setSelectedNetFile(file, sourceLabel) {
+  validateImageFile(file);
+  selectedNetFile = file;
+  const name = file.name || "clipboard image";
+  fileLabel.textContent = `${sourceLabel}: ${name}`;
+  uploadMeta.textContent = `${formatBytes(file.size)} image ready`;
+  uploadMeta.classList.remove("is-warning");
+  setStatus("Image ready");
+}
+
+async function handleIncomingImage(file, sourceLabel, detectNow = false) {
+  try {
+    setMode("upload");
+    setSelectedNetFile(file, sourceLabel);
+    if (detectNow) await detectSelectedImage();
+  } catch (error) {
+    setStatus(error.message, true);
+    uploadMeta.textContent = error.message;
+    uploadMeta.classList.add("is-warning");
+  }
 }
 
 function initPalette() {
@@ -101,7 +151,7 @@ function renderCounts() {
   if (cubeFaces) {
     FACE_ORDER.forEach((face) => {
       cubeFaces[face].forEach((color) => {
-        totals[color] += 1;
+        if (totals[color] !== undefined) totals[color] += 1;
       });
     });
   }
@@ -112,18 +162,65 @@ function renderCounts() {
     item.innerHTML = `<span>${color}</span><strong>${totals[color]}</strong>`;
     counts.appendChild(item);
   });
+  renderValidationSummary();
 }
 
 function hasValidCounts() {
-  if (!cubeFaces) return false;
+  return cubeValidationIssues().length === 0;
+}
+
+function cubeValidationIssues() {
+  if (!cubeFaces) return ["No cube loaded"];
+  const issues = [];
   const totals = Object.fromEntries(COLORS.map((color) => [color, 0]));
   FACE_ORDER.forEach((face) => {
-    if (!cubeFaces[face] || cubeFaces[face].length !== 9) return false;
+    if (!cubeFaces[face] || cubeFaces[face].length !== 9) {
+      issues.push(`${face} must have 9 stickers.`);
+      return;
+    }
     cubeFaces[face].forEach((color) => {
-      totals[color] += 1;
+      if (totals[color] === undefined) {
+        issues.push(`${face} has an unknown color.`);
+      } else {
+        totals[color] += 1;
+      }
     });
   });
-  return COLORS.every((color) => totals[color] === 9);
+
+  const badCounts = COLORS.filter((color) => totals[color] !== 9)
+    .map((color) => `${color} ${totals[color]}`)
+    .join(", ");
+  if (badCounts) issues.push(`Color counts need 9 each: ${badCounts}.`);
+
+  const centers = FACE_ORDER.map((face) => cubeFaces[face]?.[4]).filter(Boolean);
+  const centerSet = new Set(centers);
+  if (centers.length !== 6 || centerSet.size !== 6) {
+    issues.push("Center stickers must be six unique colors.");
+  }
+
+  return issues;
+}
+
+function renderValidationSummary() {
+  validationBox.innerHTML = "";
+  const issues = cubeValidationIssues();
+  validationBox.classList.toggle("is-error", cubeFaces && issues.length > 0);
+
+  if (!cubeFaces) {
+    validationBox.textContent = "No cube loaded";
+    return;
+  }
+
+  if (!issues.length) {
+    validationBox.textContent = "Counts and centers look ready.";
+    return;
+  }
+
+  issues.forEach((issue) => {
+    const line = document.createElement("div");
+    line.textContent = issue;
+    validationBox.appendChild(line);
+  });
 }
 
 function clearSolution() {
@@ -156,37 +253,61 @@ async function postJson(url, payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
+  const data = await readJson(response);
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;
 }
 
-document.getElementById("detectButton").addEventListener("click", async () => {
-  const fileInput = document.getElementById("netImage");
-  const file = fileInput.files[0];
-  if (!file) {
-    setStatus("Choose an image", true);
+async function readJson(response) {
+  const type = response.headers.get("content-type") || "";
+  if (!type.includes("application/json")) return {};
+  return response.json();
+}
+
+function detectionMeta(data) {
+  const parts = [];
+  if (data.image) parts.push(`${data.image.width}x${data.image.height}`);
+  if (data.diagnostics) {
+    parts.push(`confidence ${Math.round(data.diagnostics.lowestConfidence * 100)}%+`);
+  }
+  if (data.warnings && data.warnings.length) parts.push(data.warnings.join(" "));
+  return parts.join(" - ") || "Detected from image";
+}
+
+function updateUploadDiagnostics(data) {
+  uploadMeta.textContent = detectionMeta(data);
+  uploadMeta.classList.toggle("is-warning", Boolean(data.warnings && data.warnings.length));
+}
+
+async function detectSelectedImage() {
+  if (!selectedNetFile) {
+    setStatus("Choose, drop, or paste an image", true);
     return;
   }
 
   const body = new FormData();
-  body.append("image", file);
+  body.append("image", selectedNetFile, selectedNetFile.name || "cube-net.png");
   setStatus("Detecting...");
+  detectButton.disabled = true;
   clearSolution();
   try {
     const response = await fetch("/api/detect-net", { method: "POST", body });
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) throw new Error(data.error || "Detection failed");
-    setReviewedFaces(
-      data.faces,
-      data.warnings && data.warnings.length ? data.warnings[0] : "Detected from image"
-    );
+    setReviewedFaces(data.faces, detectionMeta(data));
+    updateUploadDiagnostics(data);
     scrambleBox.style.display = "none";
     setStatus("Detected");
   } catch (error) {
     setStatus(error.message, true);
+    uploadMeta.textContent = error.message;
+    uploadMeta.classList.add("is-warning");
+  } finally {
+    detectButton.disabled = false;
   }
-});
+}
+
+detectButton.addEventListener("click", detectSelectedImage);
 
 document.getElementById("randomButton").addEventListener("click", async () => {
   const length = Number(document.getElementById("scrambleLength").value || 20);
@@ -303,10 +424,87 @@ document.getElementById("nextStep").addEventListener("click", () => goToStep(cur
 document.getElementById("lastStep").addEventListener("click", () => {
   if (solutionStates.length) goToStep(solutionStates.length - 1);
 });
-document.getElementById("netImage").addEventListener("change", (event) => {
+netImage.addEventListener("change", (event) => {
   const file = event.target.files[0];
-  fileLabel.textContent = file ? file.name : "Choose a Ruwix-style flattened cube image";
+  if (file) {
+    handleIncomingImage(file, "Selected image");
+  } else {
+    selectedNetFile = null;
+    fileLabel.textContent = "Choose, drop, or paste a flattened cube net";
+    uploadMeta.textContent = "JPEG or PNG under 8 MB";
+    uploadMeta.classList.remove("is-warning");
+  }
 });
+
+fileDrop.addEventListener("dragenter", (event) => {
+  event.preventDefault();
+  fileDrop.classList.add("is-dragover");
+});
+
+fileDrop.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  fileDrop.classList.add("is-dragover");
+});
+
+fileDrop.addEventListener("dragleave", (event) => {
+  if (!fileDrop.contains(event.relatedTarget)) {
+    fileDrop.classList.remove("is-dragover");
+  }
+});
+
+fileDrop.addEventListener("drop", (event) => {
+  event.preventDefault();
+  fileDrop.classList.remove("is-dragover");
+  const file = firstImageFile(event.dataTransfer.files);
+  if (!file) {
+    setStatus("Drop an image file", true);
+    return;
+  }
+  handleIncomingImage(file, "Dropped image", true);
+});
+
+document.addEventListener("dragover", (event) => {
+  if (hasDraggedFiles(event)) event.preventDefault();
+});
+
+document.addEventListener("drop", (event) => {
+  if (hasDraggedFiles(event)) event.preventDefault();
+});
+
+document.addEventListener("paste", (event) => {
+  if (isTextInput(event.target)) return;
+  const file = imageFileFromClipboard(event);
+  if (!file) return;
+  event.preventDefault();
+  handleIncomingImage(file, "Pasted screenshot", true);
+});
+
+function firstImageFile(fileList) {
+  return Array.from(fileList || []).find(isImageFile);
+}
+
+function hasDraggedFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function imageFileFromClipboard(event) {
+  const files = Array.from(event.clipboardData?.files || []);
+  const file = files.find(isImageFile);
+  if (file) return file;
+
+  const item = Array.from(event.clipboardData?.items || []).find(
+    (entry) => entry.kind === "file" && entry.type.startsWith("image/")
+  );
+  return item ? item.getAsFile() : null;
+}
+
+function isTextInput(target) {
+  return (
+    target instanceof Element &&
+    Boolean(target.closest("input:not([type='file']), textarea, [contenteditable='true']"))
+  );
+}
+
 document.addEventListener("keydown", (event) => {
   if (!solutionStates.length) return;
   if (event.key === "ArrowLeft") goToStep(currentStep - 1);

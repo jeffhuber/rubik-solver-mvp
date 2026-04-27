@@ -7,6 +7,8 @@ A Railway-ready web MVP for solving a Rubik's Cube from either:
 
 The app intentionally starts with structured cube-net images rather than arbitrary cube photos. That keeps the first vision milestone deterministic: all 54 stickers are visible, aligned, and reviewable before solving.
 
+Flattened net screenshots can be selected with the file picker, dragged onto the upload target, or pasted from the clipboard.
+
 ## Local Development
 
 ```bash
@@ -22,6 +24,14 @@ Then open `http://localhost:8080`.
 
 ```bash
 python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
+```
+
+## Smoke Tests
+
+```bash
+python -m compileall app.py rubik_solver tests
+node --check static/js/main.js
+python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 ```
 
 ## Railway

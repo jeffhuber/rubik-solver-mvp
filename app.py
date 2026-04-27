@@ -1,6 +1,7 @@
 import os
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from rubik_solver.cube import (
     CubeStateError,
@@ -11,8 +12,10 @@ from rubik_solver.cube import (
 )
 from rubik_solver.net_parser import NetParseError, parse_image_bytes
 
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 
 @app.get("/")
@@ -23,11 +26,15 @@ def index():
 @app.post("/api/detect-net")
 def detect_net():
     upload = request.files.get("image")
-    if upload is None or upload.filename == "":
+    if upload is None:
         return _error("Upload a Ruwix-style cube-net image.", 400)
 
+    image_bytes = upload.read()
+    if not image_bytes:
+        return _error("The uploaded image was empty.", 400)
+
     try:
-        result = parse_image_bytes(upload.read())
+        result = parse_image_bytes(image_bytes)
     except NetParseError as exc:
         return _error(str(exc), 422)
 
@@ -80,6 +87,11 @@ def random_state():
 @app.get("/healthz")
 def healthz():
     return jsonify({"ok": True})
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def payload_too_large(_exc):
+    return _error("Image is too large. Upload a file under 8 MB.", 413)
 
 
 def _error(message, status):

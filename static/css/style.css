@@ -160,7 +160,8 @@ h2 {
   cursor: pointer;
 }
 
-.file-drop:hover {
+.file-drop:hover,
+.file-drop.is-dragover {
   border-color: var(--accent);
   background: #f4f8ff;
 }
@@ -169,6 +170,21 @@ h2 {
   position: absolute;
   opacity: 0;
   pointer-events: none;
+}
+
+.file-drop span,
+.file-drop small {
+  display: block;
+}
+
+.file-drop small {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.file-drop small.is-warning {
+  color: var(--danger);
 }
 
 .primary-action,
@@ -263,6 +279,21 @@ h2 {
 }
 
 .count-item.is-bad {
+  border-color: #f0b4b4;
+  color: var(--danger);
+}
+
+.validation-box {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.validation-box.is-error {
   border-color: #f0b4b4;
   color: var(--danger);
 }

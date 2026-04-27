@@ -24,9 +24,10 @@
           </div>
 
           <div class="mode-panel is-active" id="uploadPanel">
-            <label class="file-drop">
-              <input id="netImage" type="file" accept="image/*">
-              <span id="fileLabel">Choose a Ruwix-style flattened cube image</span>
+            <label class="file-drop" id="fileDrop">
+              <input id="netImage" type="file" accept="image/png,image/jpeg">
+              <span id="fileLabel">Choose, drop, or paste a flattened cube net</span>
+              <small id="uploadMeta">JPEG or PNG under 8 MB</small>
             </label>
             <button class="primary-action" id="detectButton" type="button">Detect stickers</button>
             <p class="hint">The parser expects the 12 by 9 unfolded cube net layout.</p>
@@ -41,6 +42,7 @@
 
           <div class="palette" id="palette" aria-label="Sticker color palette"></div>
           <div class="counts" id="counts"></div>
+          <div class="validation-box" id="validationBox">No cube loaded</div>
           <button class="solve-action" id="solveButton" type="button" disabled>Solve reviewed state</button>
         </div>
 

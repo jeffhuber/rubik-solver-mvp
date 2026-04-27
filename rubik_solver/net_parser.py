@@ -53,6 +53,13 @@ def parse_bgr_image(image: np.ndarray) -> Dict:
         confidence[sample.face][index] = sample.confidence
 
     warnings = []
+    confidence_values = [sample.confidence for sample in samples]
+    low_confidence = [sample for sample in samples if sample.confidence < 0.18]
+    if low_confidence:
+        warnings.append(
+            f"{len(low_confidence)} stickers had low color confidence; review them before solving."
+        )
+
     try:
         facelets = faces_to_facelets(faces)
     except CubeStateError as exc:
@@ -62,8 +69,16 @@ def parse_bgr_image(image: np.ndarray) -> Dict:
     return {
         "faces": faces,
         "facelets": facelets,
+        "image": {
+            "width": int(image.shape[1]),
+            "height": int(image.shape[0]),
+        },
         "rgbSamples": rgb_samples,
         "confidence": confidence,
+        "diagnostics": {
+            "lowestConfidence": round(min(confidence_values), 3),
+            "lowConfidenceStickers": len(low_confidence),
+        },
         "grid": {
             "xLines": [round(float(value), 2) for value in x_lines],
             "yLines": [round(float(value), 2) for value in y_lines],
