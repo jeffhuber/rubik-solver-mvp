@@ -2,8 +2,13 @@ const FACE_ORDER = ["U", "R", "F", "D", "L", "B"];
 const DISPLAY_FACE_ORDER = ["U", "L", "F", "R", "B", "D"];
 const COLORS = ["white", "yellow", "red", "orange", "blue", "green"];
 
+let reviewedFaces = null;
 let cubeFaces = null;
 let selectedColor = "white";
+let solutionStates = [];
+let solutionMoves = [];
+let solutionInstructions = [];
+let currentStep = 0;
 
 const statusPill = document.getElementById("statusPill");
 const cubeNet = document.getElementById("cubeNet");
@@ -11,10 +16,19 @@ const counts = document.getElementById("counts");
 const palette = document.getElementById("palette");
 const solveButton = document.getElementById("solveButton");
 const reviewMeta = document.getElementById("reviewMeta");
+const stepContext = document.getElementById("stepContext");
 const movesEl = document.getElementById("moves");
 const instructionsEl = document.getElementById("instructions");
 const moveCount = document.getElementById("moveCount");
 const scrambleBox = document.getElementById("scrambleBox");
+const stepper = document.getElementById("stepper");
+const stepLabel = document.getElementById("stepLabel");
+const stepMove = document.getElementById("stepMove");
+const fileLabel = document.getElementById("fileLabel");
+
+function cloneFaces(faces) {
+  return JSON.parse(JSON.stringify(faces));
+}
 
 function setStatus(message, isError = false) {
   statusPill.textContent = message;
@@ -59,9 +73,13 @@ function renderCube() {
       sticker.className = `sticker color-${color}`;
       sticker.dataset.label = index === 4 ? face : "";
       sticker.title = `${face}${index + 1}: ${color}`;
+      sticker.disabled = !canEditStickers();
       sticker.addEventListener("click", () => {
+        if (!canEditStickers()) return;
+        if (solutionStates.length) clearSolution();
+        if (!reviewedFaces) reviewedFaces = cloneFaces(cubeFaces);
+        reviewedFaces[face][index] = selectedColor;
         cubeFaces[face][index] = selectedColor;
-        clearSolution();
         renderCube();
       });
       faceEl.appendChild(sticker);
@@ -71,6 +89,10 @@ function renderCube() {
 
   solveButton.disabled = !hasValidCounts();
   renderCounts();
+}
+
+function canEditStickers() {
+  return solutionStates.length === 0 || currentStep === 0;
 }
 
 function renderCounts() {
@@ -105,9 +127,27 @@ function hasValidCounts() {
 }
 
 function clearSolution() {
+  solutionStates = [];
+  solutionMoves = [];
+  solutionInstructions = [];
+  currentStep = 0;
+  stepper.hidden = true;
   movesEl.innerHTML = "";
   instructionsEl.innerHTML = "";
   moveCount.textContent = "";
+  stepContext.textContent = reviewedFaces
+    ? "Review and correct the starting state before solving."
+    : "Load a cube net or random scramble to begin.";
+  if (reviewedFaces) cubeFaces = cloneFaces(reviewedFaces);
+  renderPlaybackControls();
+}
+
+function setReviewedFaces(faces, metaText) {
+  reviewedFaces = cloneFaces(faces);
+  cubeFaces = cloneFaces(faces);
+  clearSolution();
+  reviewMeta.textContent = metaText;
+  renderCube();
 }
 
 async function postJson(url, payload) {
@@ -137,10 +177,11 @@ document.getElementById("detectButton").addEventListener("click", async () => {
     const response = await fetch("/api/detect-net", { method: "POST", body });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Detection failed");
-    cubeFaces = data.faces;
-    reviewMeta.textContent = data.warnings && data.warnings.length ? data.warnings[0] : "Detected from image";
+    setReviewedFaces(
+      data.faces,
+      data.warnings && data.warnings.length ? data.warnings[0] : "Detected from image"
+    );
     scrambleBox.style.display = "none";
-    renderCube();
     setStatus("Detected");
   } catch (error) {
     setStatus(error.message, true);
@@ -153,11 +194,9 @@ document.getElementById("randomButton").addEventListener("click", async () => {
   clearSolution();
   try {
     const data = await postJson("/api/random", { length });
-    cubeFaces = data.faces;
-    reviewMeta.textContent = "Generated scramble";
+    setReviewedFaces(data.faces, "Generated scramble");
     scrambleBox.style.display = "block";
     scrambleBox.textContent = data.scramble.join(" ");
-    renderCube();
     renderSolution(data);
     setStatus("Generated");
   } catch (error) {
@@ -166,11 +205,11 @@ document.getElementById("randomButton").addEventListener("click", async () => {
 });
 
 solveButton.addEventListener("click", async () => {
-  if (!cubeFaces) return;
+  if (!reviewedFaces) return;
   setStatus("Solving...");
   clearSolution();
   try {
-    const data = await postJson("/api/solve", { faces: cubeFaces });
+    const data = await postJson("/api/solve", { faces: reviewedFaces });
     renderSolution(data);
     setStatus("Solved");
   } catch (error) {
@@ -181,17 +220,70 @@ solveButton.addEventListener("click", async () => {
 function renderSolution(data) {
   movesEl.innerHTML = "";
   instructionsEl.innerHTML = "";
+  solutionStates = data.states || [];
+  solutionMoves = data.moves || [];
+  solutionInstructions = data.instructions || [];
   moveCount.textContent = `${data.moveCount} moves`;
-  data.moves.forEach((move) => {
-    const chip = document.createElement("div");
+  solutionMoves.forEach((move, index) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
     chip.className = "move-chip";
     chip.textContent = move;
+    chip.title = `Jump to step ${index + 1}`;
+    chip.addEventListener("click", () => goToStep(index + 1));
     movesEl.appendChild(chip);
   });
-  data.instructions.forEach((instruction) => {
+  solutionInstructions.forEach((instruction, index) => {
     const item = document.createElement("li");
-    item.textContent = instruction;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "instruction-button";
+    button.textContent = instruction;
+    button.addEventListener("click", () => goToStep(index + 1));
+    item.appendChild(button);
     instructionsEl.appendChild(item);
+  });
+  if (solutionStates.length) {
+    stepper.hidden = false;
+    goToStep(0);
+  }
+}
+
+function goToStep(step) {
+  if (!solutionStates.length) return;
+  currentStep = Math.max(0, Math.min(step, solutionStates.length - 1));
+  cubeFaces = cloneFaces(solutionStates[currentStep]);
+  renderCube();
+  renderPlaybackControls();
+}
+
+function renderPlaybackControls() {
+  if (!solutionStates.length) {
+    stepLabel.textContent = "Step 0";
+    stepMove.textContent = "Starting state";
+    return;
+  }
+
+  stepLabel.textContent = `Step ${currentStep} of ${solutionStates.length - 1}`;
+  stepMove.textContent =
+    currentStep === 0
+      ? "Starting state"
+      : `${solutionMoves[currentStep - 1]} - ${solutionInstructions[currentStep - 1]}`;
+  stepContext.textContent =
+    currentStep === 0
+      ? "Starting state. You can still correct stickers here."
+      : "Playback mode. Use the arrows or click a move to inspect the cube.";
+
+  document.getElementById("firstStep").disabled = currentStep === 0;
+  document.getElementById("prevStep").disabled = currentStep === 0;
+  document.getElementById("nextStep").disabled = currentStep === solutionStates.length - 1;
+  document.getElementById("lastStep").disabled = currentStep === solutionStates.length - 1;
+
+  document.querySelectorAll(".move-chip").forEach((chip, index) => {
+    chip.classList.toggle("is-active", currentStep === index + 1);
+  });
+  document.querySelectorAll(".instruction-button").forEach((button, index) => {
+    button.classList.toggle("is-active", currentStep === index + 1);
   });
 }
 
@@ -205,6 +297,21 @@ function setMode(mode) {
 
 document.getElementById("uploadTab").addEventListener("click", () => setMode("upload"));
 document.getElementById("randomTab").addEventListener("click", () => setMode("random"));
+document.getElementById("firstStep").addEventListener("click", () => goToStep(0));
+document.getElementById("prevStep").addEventListener("click", () => goToStep(currentStep - 1));
+document.getElementById("nextStep").addEventListener("click", () => goToStep(currentStep + 1));
+document.getElementById("lastStep").addEventListener("click", () => {
+  if (solutionStates.length) goToStep(solutionStates.length - 1);
+});
+document.getElementById("netImage").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  fileLabel.textContent = file ? file.name : "Choose a Ruwix-style flattened cube image";
+});
+document.addEventListener("keydown", (event) => {
+  if (!solutionStates.length) return;
+  if (event.key === "ArrowLeft") goToStep(currentStep - 1);
+  if (event.key === "ArrowRight") goToStep(currentStep + 1);
+});
 
 initPalette();
 renderCube();

@@ -2,7 +2,13 @@ import os
 
 from flask import Flask, jsonify, render_template, request
 
-from rubik_solver.cube import CubeStateError, move_to_instruction, random_scramble_state, solve_faces
+from rubik_solver.cube import (
+    CubeStateError,
+    move_to_instruction,
+    random_scramble_state,
+    solution_states,
+    solve_faces,
+)
 from rubik_solver.net_parser import NetParseError, parse_image_bytes
 
 app = Flask(__name__)
@@ -45,6 +51,7 @@ def solve():
             "moves": moves,
             "instructions": [move_to_instruction(move) for move in moves],
             "moveCount": len(moves),
+            "states": solution_states(faces, moves),
         }
     )
 
@@ -65,6 +72,7 @@ def random_state():
             "moves": solution,
             "instructions": [move_to_instruction(move) for move in solution],
             "moveCount": len(solution),
+            "states": solution_states(faces, solution),
         }
     )
 

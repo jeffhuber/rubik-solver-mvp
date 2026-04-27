@@ -2,6 +2,8 @@ import random
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import kociemba
+from kociemba.pykociemba.cubiecube import moveCube
+from kociemba.pykociemba.facecube import FaceCube
 
 from .constants import COLOR_ORDER, DEFAULT_FACE_COLORS, FACE_ORDER, MOVE_FACES
 
@@ -123,15 +125,29 @@ def solved_facelets() -> str:
 
 
 def facelets_to_color_faces(facelets: str) -> Faces:
+    return facelets_to_faces(facelets, {face: DEFAULT_FACE_COLORS[face] for face in FACE_ORDER})
+
+
+def facelets_to_faces(facelets: str, face_to_color: Dict[str, str]) -> Faces:
     if len(facelets) != 54:
         raise CubeStateError("Facelet string must contain 54 characters.")
-    face_to_color = {face: DEFAULT_FACE_COLORS[face] for face in FACE_ORDER}
     faces = {}
     offset = 0
     for face in FACE_ORDER:
         faces[face] = [face_to_color[ch] for ch in facelets[offset : offset + 9]]
         offset += 9
     return faces
+
+
+def solution_states(faces: Faces, moves: Sequence[str]) -> List[Faces]:
+    facelets = faces_to_facelets(faces)
+    face_to_color = {face: faces[face][4] for face in FACE_ORDER}
+    states = [facelets_to_faces(facelets, face_to_color)]
+    state = facelets
+    for move in moves:
+        state = apply_move(state, move)
+        states.append(facelets_to_faces(state, face_to_color))
+    return states
 
 
 def apply_moves(facelets: str, moves: Iterable[str]) -> str:
@@ -150,84 +166,14 @@ def apply_move(facelets: str, move: str) -> str:
     turns = 2 if move.endswith("2") else 3 if move.endswith("'") else 1
     state = facelets
     for _ in range(turns):
-        state = _apply_clockwise_turn(state, face)
+        state = _apply_kociemba_clockwise_turn(state, face)
     return state
 
 
-def _apply_clockwise_turn(facelets: str, face: str) -> str:
-    index_to_coord = _index_to_coord_map()
-    coord_to_index = {value: key for key, value in index_to_coord.items()}
-    axis, layer, sign = _turn_definition(face)
-    result = list(facelets)
-
-    for index, coord in index_to_coord.items():
-        position, normal = coord
-        if position[axis] != layer:
-            continue
-        new_position = _rotate_tuple(position, axis, sign)
-        new_normal = _rotate_tuple(normal, axis, sign)
-        result[coord_to_index[(new_position, new_normal)]] = facelets[index]
-
-    return "".join(result)
-
-
-def _turn_definition(face: str) -> Tuple[int, int, int]:
-    # axis: x=0, y=1, z=2. sign is a quarter turn in right-handed coordinates.
-    return {
-        "R": (0, 1, 1),
-        "L": (0, -1, -1),
-        "U": (1, 1, 1),
-        "D": (1, -1, -1),
-        "F": (2, 1, -1),
-        "B": (2, -1, 1),
-    }[face]
-
-
-def _rotate_tuple(values: Tuple[int, int, int], axis: int, sign: int) -> Tuple[int, int, int]:
-    x, y, z = values
-    if axis == 0:
-        return (x, -sign * z, sign * y)
-    if axis == 1:
-        return (sign * z, y, -sign * x)
-    return (sign * y, -sign * x, z)
-
-
-def _index_to_coord_map() -> Dict[int, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
-    mapping = {}
-    index = 0
-    for face in FACE_ORDER:
-        for row in range(3):
-            for col in range(3):
-                mapping[index] = (_facelet_position(face, row, col), _face_normal(face))
-                index += 1
-    return mapping
-
-
-def _face_normal(face: str) -> Tuple[int, int, int]:
-    return {
-        "U": (0, 1, 0),
-        "D": (0, -1, 0),
-        "F": (0, 0, 1),
-        "B": (0, 0, -1),
-        "R": (1, 0, 0),
-        "L": (-1, 0, 0),
-    }[face]
-
-
-def _facelet_position(face: str, row: int, col: int) -> Tuple[int, int, int]:
-    if face == "U":
-        return (col - 1, 1, row - 1)
-    if face == "D":
-        return (col - 1, -1, 1 - row)
-    if face == "F":
-        return (col - 1, 1 - row, 1)
-    if face == "B":
-        return (1 - col, 1 - row, -1)
-    if face == "R":
-        return (1, 1 - row, 1 - col)
-    if face == "L":
-        return (-1, 1 - row, col - 1)
-    raise CubeStateError(f"Unknown face: {face}")
+def _apply_kociemba_clockwise_turn(facelets: str, face: str) -> str:
+    cube = FaceCube(facelets).toCubieCube()
+    cube.multiply(moveCube[MOVE_FACES.index(face)])
+    return cube.toFaceCube().to_String()
 
 
 def move_to_instruction(move: str) -> str:
