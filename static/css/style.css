@@ -615,6 +615,11 @@ h2 {
   padding: 10px;
 }
 
+.stepper[hidden],
+.solution-actions[hidden] {
+  display: none;
+}
+
 .step-button {
   min-width: 0;
   width: 100%;
@@ -631,6 +636,28 @@ h2 {
 .step-button:disabled {
   color: #a5afbd;
   cursor: not-allowed;
+}
+
+.speed-control {
+  display: flex;
+  grid-column: 1 / span 3;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.speed-control select {
+  min-width: 0;
+  width: 72px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 6px 7px;
+  font-size: 13px;
 }
 
 .step-readout {
@@ -652,9 +679,33 @@ h2 {
 }
 
 .step-range {
-  grid-column: 1 / -1;
+  grid-column: 4 / -1;
   width: 100%;
   accent-color: var(--accent);
+}
+
+.solution-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.solution-action-button {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 9px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.solution-action-button:disabled {
+  color: #a5afbd;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1120px) {
@@ -708,6 +759,18 @@ h2 {
     min-width: 0;
     height: 36px;
     font-size: 12px;
+  }
+
+  .speed-control {
+    grid-column: 1 / -1;
+  }
+
+  .step-range {
+    grid-column: 1 / -1;
+  }
+
+  .solution-actions {
+    grid-template-columns: 1fr;
   }
 
   .cube-net {

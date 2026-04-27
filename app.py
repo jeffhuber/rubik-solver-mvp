@@ -15,6 +15,7 @@ from rubik_solver.cube import (
 from rubik_solver.net_parser import NetParseError, parse_image_bytes
 
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+VALID_MOVES = {face + suffix for face in "UDFBRL" for suffix in ("", "'", "2")}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -58,6 +59,37 @@ def solve():
         return _error(str(exc), 422)
 
     return jsonify(_solution_payload(faces, result, validation=validate_faces_report(faces)))
+
+
+@app.post("/api/replay")
+def replay():
+    payload = request.get_json(silent=True) or {}
+    faces = payload.get("faces")
+    moves = payload.get("moves")
+    if not isinstance(faces, dict):
+        return _error("Request JSON must include a faces object.", 400)
+    if not isinstance(moves, list) or not all(isinstance(move, str) for move in moves):
+        return _error("Request JSON must include a moves array.", 400)
+    if len(moves) > 120:
+        return _error("Shared solutions are limited to 120 moves.", 400)
+    invalid_moves = [move for move in moves if move not in VALID_MOVES]
+    if invalid_moves:
+        return _error(f"Shared solution includes invalid moves: {', '.join(invalid_moves)}.", 400)
+
+    try:
+        states = solution_states(faces, moves)
+    except CubeStateError as exc:
+        return _error(str(exc), 422)
+
+    return jsonify(
+        {
+            "moves": moves,
+            "instructions": [move_to_instruction(move) for move in moves],
+            "moveCount": len(moves),
+            "states": states,
+            "validation": validate_faces_report(faces),
+        }
+    )
 
 
 @app.post("/api/validate")

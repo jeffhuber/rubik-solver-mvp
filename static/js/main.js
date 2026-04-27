@@ -7,6 +7,16 @@ const QUALITY_HINTS = {
   tighter: "Tighter first tries to stay within 21 moves, then falls back if needed.",
   god20: "Try 20 searches harder for a 20-move-or-less solution before falling back.",
 };
+const PLAYBACK_SPEEDS = {
+  "0.5": { turnMs: 900, pauseMs: 220 },
+  "1": { turnMs: 520, pauseMs: 120 },
+  "1.5": { turnMs: 360, pauseMs: 80 },
+  "2": { turnMs: 260, pauseMs: 45 },
+  "4": { turnMs: 140, pauseMs: 20 },
+};
+const DEFAULT_PLAYBACK_SPEED = "1";
+const PLAYBACK_SPEED_STORAGE_KEY = "rubikPlaybackSpeed";
+const SHARE_PARAM = "case";
 
 let reviewedFaces = null;
 let cubeFaces = null;
@@ -15,6 +25,8 @@ let selectedColor = "white";
 let solutionStates = [];
 let solutionMoves = [];
 let solutionInstructions = [];
+let currentScramble = [];
+let activeSolveMetadata = null;
 let currentStep = 0;
 let detectionDiagnostics = null;
 let validationReport = null;
@@ -54,6 +66,11 @@ const qualityHint = document.getElementById("qualityHint");
 const parserDebug = document.getElementById("parserDebug");
 const parserDebugImage = document.getElementById("parserDebugImage");
 const parserDebugMeta = document.getElementById("parserDebugMeta");
+const solutionActions = document.getElementById("solutionActions");
+const copySolutionButton = document.getElementById("copySolutionButton");
+const shareSolutionButton = document.getElementById("shareSolutionButton");
+const downloadCaseButton = document.getElementById("downloadCaseButton");
+const playbackSpeed = document.getElementById("playbackSpeed");
 
 function cloneFaces(faces) {
   return JSON.parse(JSON.stringify(faces));
@@ -62,6 +79,32 @@ function cloneFaces(faces) {
 function setStatus(message, isError = false) {
   statusPill.textContent = message;
   statusPill.classList.toggle("is-error", isError);
+}
+
+function currentPlaybackProfile() {
+  return PLAYBACK_SPEEDS[playbackSpeed.value] || PLAYBACK_SPEEDS[DEFAULT_PLAYBACK_SPEED];
+}
+
+function applyPlaybackSpeed(persist = true) {
+  if (!PLAYBACK_SPEEDS[playbackSpeed.value]) {
+    playbackSpeed.value = DEFAULT_PLAYBACK_SPEED;
+  }
+  const profile = currentPlaybackProfile();
+  if (persist) {
+    window.localStorage?.setItem(PLAYBACK_SPEED_STORAGE_KEY, playbackSpeed.value);
+  }
+  if (window.Rubik3D?.setTurnDuration) {
+    window.Rubik3D.setTurnDuration(profile.turnMs);
+  }
+}
+
+function initPlaybackSpeed() {
+  const saved = window.localStorage?.getItem(PLAYBACK_SPEED_STORAGE_KEY);
+  if (saved && PLAYBACK_SPEEDS[saved]) {
+    playbackSpeed.value = saved;
+  }
+  playbackSpeed.addEventListener("change", () => applyPlaybackSpeed());
+  applyPlaybackSpeed(false);
 }
 
 function stickerKey(face, index) {
@@ -124,6 +167,7 @@ function validateImageFile(file) {
 function setSelectedNetFile(file, sourceLabel) {
   validateImageFile(file);
   selectedNetFile = file;
+  clearShareHash();
   clearParserDebug();
   const name = file.name || "clipboard image";
   fileLabel.textContent = `${sourceLabel}: ${name}`;
@@ -196,6 +240,9 @@ function renderCube() {
         if (!reviewedFaces) reviewedFaces = cloneFaces(cubeFaces);
         reviewedFaces[face][index] = selectedColor;
         cubeFaces[face][index] = selectedColor;
+        currentScramble = [];
+        renderScrambleBox();
+        clearShareHash();
         manualCorrections.add(key);
         if (reviewTargetKey === key) reviewTargetKey = null;
         validationReport = null;
@@ -330,6 +377,7 @@ function clearSolution() {
   solutionStates = [];
   solutionMoves = [];
   solutionInstructions = [];
+  activeSolveMetadata = null;
   currentStep = 0;
   stepper.hidden = true;
   movesEl.innerHTML = "";
@@ -344,18 +392,31 @@ function clearSolution() {
   stepRange.value = 0;
   stepRange.max = 0;
   renderPlaybackControls();
+  updateSolutionActions();
   syncCube3d();
 }
 
-function setReviewedFaces(faces, metaText, diagnostics = null, validation = null) {
+function setReviewedFaces(faces, metaText, diagnostics = null, validation = null, options = {}) {
+  currentScramble = Array.isArray(options.scramble) ? [...options.scramble] : [];
   reviewedFaces = cloneFaces(faces);
   cubeFaces = cloneFaces(faces);
   clearDetectionDiagnostics();
   if (diagnostics) setDetectionDiagnostics(diagnostics);
   validationReport = validation;
   clearSolution();
+  renderScrambleBox();
   reviewMeta.textContent = metaText;
   renderCube();
+}
+
+function renderScrambleBox() {
+  if (!currentScramble.length) {
+    scrambleBox.style.display = "none";
+    scrambleBox.textContent = "";
+    return;
+  }
+  scrambleBox.style.display = "block";
+  scrambleBox.textContent = currentScramble.join(" ");
 }
 
 async function postJson(url, payload) {
@@ -411,6 +472,9 @@ async function detectSelectedImage() {
   detectButton.disabled = true;
   clearSolution();
   clearParserDebug();
+  clearShareHash();
+  currentScramble = [];
+  renderScrambleBox();
   try {
     const response = await fetch("/api/detect-net", { method: "POST", body });
     const data = await readJson(response);
@@ -418,7 +482,6 @@ async function detectSelectedImage() {
     setReviewedFaces(data.faces, detectionMeta(data), data.diagnostics, data.validation);
     setParserDebug(data.debug);
     updateUploadDiagnostics(data);
-    scrambleBox.style.display = "none";
     setStatus("Detected");
   } catch (error) {
     setStatus(error.message, true);
@@ -441,11 +504,12 @@ document.getElementById("randomButton").addEventListener("click", async () => {
   setStatus(statusForQuality(quality));
   setSolving(true);
   clearSolution();
+  clearShareHash();
+  currentScramble = [];
+  renderScrambleBox();
   try {
     const data = await postJson("/api/random", { length, quality });
-    setReviewedFaces(data.faces, "Generated scramble");
-    scrambleBox.style.display = "block";
-    scrambleBox.textContent = data.scramble.join(" ");
+    setReviewedFaces(data.faces, "Generated scramble", null, null, { scramble: data.scramble });
     renderSolution(data);
     setStatus("Generated");
   } catch (error) {
@@ -462,6 +526,7 @@ solveButton.addEventListener("click", async () => {
   setStatus(statusForQuality(quality));
   setSolving(true);
   clearSolution();
+  clearShareHash();
   try {
     const data = await postJson("/api/solve", { faces: reviewedFaces, quality });
     validationReport = data.validation || null;
@@ -483,6 +548,11 @@ function renderSolution(data) {
   solutionStates = data.states || [];
   solutionMoves = data.moves || [];
   solutionInstructions = data.instructions || [];
+  activeSolveMetadata = data.solve || null;
+  if (Array.isArray(data.scramble)) {
+    currentScramble = [...data.scramble];
+    renderScrambleBox();
+  }
   moveCount.textContent = `${data.moveCount} moves`;
   renderSolveMeta(data.solve);
   stepRange.max = Math.max(0, solutionStates.length - 1);
@@ -516,6 +586,7 @@ function renderSolution(data) {
     stepper.hidden = false;
     goToStep(0, { animate: false });
   }
+  updateSolutionActions();
 }
 
 function renderSolveMeta(solve) {
@@ -558,6 +629,7 @@ function setSolving(value) {
   document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
     input.disabled = value;
   });
+  updateSolutionActions();
 }
 
 async function goToStep(step, options = {}) {
@@ -617,7 +689,7 @@ async function runPlayback() {
   }
   while (isPlaying && currentStep < solutionStates.length - 1) {
     await goToStep(currentStep + 1, { animate: true, fromPlayback: true });
-    await delay(120);
+    await delay(currentPlaybackProfile().pauseMs);
   }
   isPlaying = false;
   renderPlaybackControls();
@@ -679,6 +751,225 @@ function renderPlaybackControls() {
     button.classList.toggle("is-active", currentStep === index + 1);
     button.disabled = isStepping;
   });
+  updateSolutionActions();
+}
+
+function hasShareableSolution() {
+  return Boolean(reviewedFaces && solutionStates.length);
+}
+
+function updateSolutionActions() {
+  const hasSolution = hasShareableSolution();
+  solutionActions.hidden = !hasSolution;
+  copySolutionButton.disabled = !hasSolution || isSolving;
+  shareSolutionButton.disabled = !hasSolution || isSolving;
+  downloadCaseButton.disabled = !hasSolution || isSolving;
+  downloadCaseButton.textContent = currentScramble.length ? "Download scramble" : "Download solution";
+}
+
+async function copySolution() {
+  if (!hasShareableSolution()) return;
+  try {
+    await writeClipboard(solutionText());
+    setStatus("Solution copied");
+  } catch (error) {
+    setStatus("Copy failed", true);
+  }
+}
+
+async function shareSolutionLink() {
+  if (!hasShareableSolution()) return;
+  const url = createShareUrl();
+  const title = "Rubik Solver solution";
+  const text = currentScramble.length
+    ? `Rubik scramble: ${currentScramble.join(" ")}`
+    : `Rubik solution: ${formatMoves(solutionMoves)}`;
+
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text, url });
+      window.history.replaceState(null, "", url);
+      setStatus("Share sheet opened");
+      return;
+    }
+    await writeClipboard(url);
+    window.history.replaceState(null, "", url);
+    setStatus("Share link copied");
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    try {
+      await writeClipboard(url);
+      window.history.replaceState(null, "", url);
+      setStatus("Share link copied");
+    } catch (_copyError) {
+      setStatus("Share failed", true);
+    }
+  }
+}
+
+function downloadCase() {
+  if (!hasShareableSolution()) return;
+  const blob = new Blob([solutionText({ includeShareLink: true, includeState: true })], {
+    type: "text/plain;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${currentScramble.length ? "rubik-scramble" : "rubik-solution"}-${timestampSlug()}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus(currentScramble.length ? "Scramble downloaded" : "Solution downloaded");
+}
+
+function solutionText(options = {}) {
+  const lines = ["Rubik Solver solution"];
+  if (currentScramble.length) {
+    lines.push("", "Scramble:", currentScramble.join(" "));
+  }
+  lines.push("", `Solution (${solutionMoves.length} moves):`, formatMoves(solutionMoves));
+
+  if (solutionInstructions.length) {
+    lines.push("", "Steps:");
+    solutionInstructions.forEach((instruction, index) => {
+      lines.push(`${index + 1}. ${solutionMoves[index]} - ${instruction}`);
+    });
+  }
+
+  if (options.includeState && reviewedFaces) {
+    lines.push("", "Starting state:");
+    FACE_ORDER.forEach((face) => {
+      lines.push(`${face}: ${reviewedFaces[face].join(" ")}`);
+    });
+  }
+
+  if (options.includeShareLink) {
+    lines.push("", "Share link:", createShareUrl());
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMoves(moves) {
+  return moves.length ? moves.join(" ") : "Already solved";
+}
+
+function createShareUrl() {
+  const payload = {
+    v: 1,
+    faces: reviewedFaces,
+    moves: solutionMoves,
+    scramble: currentScramble,
+    solve: activeSolveMetadata,
+  };
+  const encoded = encodeBase64Url(JSON.stringify(payload));
+  return `${window.location.origin}${window.location.pathname}${window.location.search}#${SHARE_PARAM}=${encoded}`;
+}
+
+function clearShareHash() {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (!params.has(SHARE_PARAM)) return;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.origin}${window.location.pathname}${window.location.search}`
+  );
+}
+
+async function restoreSharedSolutionFromHash() {
+  const payload = sharedPayloadFromHash();
+  if (!payload) return;
+  if (payload.v !== 1 || !payload.faces || !Array.isArray(payload.moves)) {
+    setStatus("Shared link is not valid", true);
+    return;
+  }
+
+  setStatus("Loading shared solution...");
+  setSolving(true);
+  clearSolution();
+  try {
+    const data = await postJson("/api/replay", {
+      faces: payload.faces,
+      moves: payload.moves,
+    });
+    const scramble = Array.isArray(payload.scramble) ? payload.scramble : [];
+    setReviewedFaces(
+      payload.faces,
+      scramble.length ? "Shared scramble" : "Shared solution",
+      null,
+      data.validation,
+      { scramble }
+    );
+    renderSolution({
+      ...data,
+      scramble,
+      solve: payload.solve || {
+        quality: "shared",
+        qualityLabel: "Shared",
+        usedFallback: false,
+        attempts: [],
+        message: `Shared solution loaded (${data.moveCount} moves).`,
+      },
+    });
+    setStatus("Shared solution loaded");
+  } catch (error) {
+    setStatus(error.message || "Shared link could not load", true);
+  } finally {
+    setSolving(false);
+    renderCube();
+  }
+}
+
+function sharedPayloadFromHash() {
+  if (!window.location.hash) return null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const encoded = params.get(SHARE_PARAM);
+  if (!encoded) return null;
+  try {
+    return JSON.parse(decodeBase64Url(encoded));
+  } catch (_error) {
+    return { v: null };
+  }
+}
+
+function encodeBase64Url(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64Url(value) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "-1000px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  textArea.remove();
+  if (!copied) throw new Error("Clipboard unavailable");
+}
+
+function timestampSlug() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 function setMode(mode) {
@@ -708,6 +999,9 @@ document.getElementById("lastStep").addEventListener("click", () => {
   if (solutionStates.length) goToStep(solutionStates.length - 1, { animate: false });
 });
 playSteps.addEventListener("click", togglePlayback);
+copySolutionButton.addEventListener("click", copySolution);
+shareSolutionButton.addEventListener("click", shareSolutionLink);
+downloadCaseButton.addEventListener("click", downloadCase);
 stepRange.addEventListener("input", () => {
   stopPlayback();
   goToStep(Number(stepRange.value), { animate: false });
@@ -838,7 +1132,10 @@ function clearParserDebug() {
   debugOverlayButton.textContent = "Show parser overlay";
 }
 
-document.addEventListener("rubik3d-ready", syncCube3d);
+document.addEventListener("rubik3d-ready", () => {
+  applyPlaybackSpeed(false);
+  syncCube3d();
+});
 
 document.addEventListener("keydown", (event) => {
   if (isTextInput(event.target)) return;
@@ -866,6 +1163,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 initPalette();
+initPlaybackSpeed();
 document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
   input.addEventListener("change", () => {
     qualityHint.textContent = QUALITY_HINTS[selectedSolveQuality()];
@@ -873,3 +1171,5 @@ document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
 });
 qualityHint.textContent = QUALITY_HINTS[selectedSolveQuality()];
 renderCube();
+restoreSharedSolutionFromHash();
+window.addEventListener("hashchange", restoreSharedSolutionFromHash);

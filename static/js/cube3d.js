@@ -32,7 +32,7 @@ const CUBIE_SPACING = 1.03;
 const CUBIE_SIZE = 0.96;
 const STICKER_SIZE = 0.72;
 const STICKER_OFFSET = 0.492;
-const TURN_DURATION_MS = 520;
+const DEFAULT_TURN_DURATION_MS = 520;
 
 const canvas = document.getElementById("cube3dCanvas");
 const scene = new THREE.Scene();
@@ -54,6 +54,7 @@ const bodyMaterial = new THREE.MeshStandardMaterial({
 let activeTurn = null;
 let isDragging = false;
 let lastPointer = { x: 0, y: 0 };
+let turnDurationMs = DEFAULT_TURN_DURATION_MS;
 
 camera.position.set(5.2, 4.1, 6.2);
 camera.lookAt(0, 0, 0);
@@ -77,6 +78,7 @@ window.Rubik3D = {
   animateMove,
   isAnimating: () => Boolean(activeTurn),
   setFaces,
+  setTurnDuration,
 };
 document.dispatchEvent(new Event("rubik3d-ready"));
 
@@ -212,8 +214,16 @@ function animateMove(move, nextFaces) {
       resolve,
       startedAt: performance.now(),
       targetAngle: info.angle,
+      durationMs: turnDurationMs,
     };
   });
+}
+
+function setTurnDuration(ms) {
+  const nextMs = Number(ms);
+  turnDurationMs = Number.isFinite(nextMs)
+    ? Math.max(80, Math.min(1400, nextMs))
+    : DEFAULT_TURN_DURATION_MS;
 }
 
 function moveInfo(move) {
@@ -251,7 +261,7 @@ function resize() {
 function animate(now = performance.now()) {
   requestAnimationFrame(animate);
   if (activeTurn) {
-    const progress = Math.min(1, (now - activeTurn.startedAt) / TURN_DURATION_MS);
+    const progress = Math.min(1, (now - activeTurn.startedAt) / activeTurn.durationMs);
     activeTurn.layerGroup.rotation[activeTurn.axis] = activeTurn.targetAngle * easeInOutCubic(progress);
     if (progress >= 1) finishActiveTurn(true);
   }

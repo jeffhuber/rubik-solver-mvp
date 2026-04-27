@@ -11,7 +11,9 @@ The app intentionally starts with structured cube-net images rather than arbitra
 
 Flattened net screenshots can be selected with the file picker, dragged onto the upload target, or pasted from the clipboard.
 
-After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a parser debug overlay, selectable solver quality, a move timeline, keyboard step-through controls, and a live Three.js cube view with animated layer turns.
+After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a parser debug overlay, selectable solver quality, a move timeline, keyboard step-through controls, playback speed, copy/download/share actions, and a live Three.js cube view with animated layer turns.
+
+Solution sharing is stateless: the share action creates a URL fragment containing the reviewed starting state, solution moves, optional generated scramble, and solver metadata. Opening that link reconstructs the solution through `/api/replay`; no database-backed saved cases are required.
 
 ## Local Development
 

@@ -62,6 +62,14 @@ def main() -> int:
             raise AssertionError("API solve did not return solver quality metadata.")
         assert_is_solved(payload["states"][-1])
 
+        replay = client.post("/api/replay", json={"faces": tight_faces, "moves": payload["moves"]})
+        if replay.status_code != 200:
+            raise AssertionError(f"API replay failed: {replay.get_data(as_text=True)}")
+        replay_payload = replay.get_json()
+        if replay_payload["moveCount"] != payload["moveCount"]:
+            raise AssertionError("API replay did not preserve the move count.")
+        assert_is_solved(replay_payload["states"][-1])
+
     for path in sys.argv[1:]:
         print(f"\nImage parser smoke test: {path}")
         parsed = parse_image_file(path)

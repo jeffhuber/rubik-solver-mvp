@@ -104,7 +104,22 @@
             </div>
             <button class="step-button" id="nextStep" type="button" aria-label="Next move">&gt;</button>
             <button class="step-button" id="lastStep" type="button" aria-label="Go to final state">&gt;|</button>
+            <label class="speed-control" for="playbackSpeed">
+              <span>Speed</span>
+              <select id="playbackSpeed" aria-label="Playback speed">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </label>
             <input class="step-range" id="stepRange" type="range" min="0" max="0" value="0" aria-label="Solution step">
+          </div>
+          <div class="solution-actions" id="solutionActions" hidden>
+            <button class="solution-action-button" id="copySolutionButton" type="button" disabled>Copy solution</button>
+            <button class="solution-action-button" id="shareSolutionButton" type="button" disabled>Share link</button>
+            <button class="solution-action-button" id="downloadCaseButton" type="button" disabled>Download solution</button>
           </div>
           <div class="moves" id="moves"></div>
           <div class="solve-meta" id="solveMeta"></div>
