@@ -13,17 +13,17 @@
           <p class="eyebrow">Rubik Solver MVP</p>
           <h1>Flattened Net Solver</h1>
         </div>
-        <div class="status-pill" id="statusPill">Ready</div>
+        <div class="status-pill" id="statusPill" role="status" aria-live="polite">Ready</div>
       </header>
 
       <section class="workspace">
         <div class="input-panel">
           <div class="tabs" role="tablist" aria-label="Input mode">
-            <button class="tab is-active" id="uploadTab" type="button">Upload net</button>
-            <button class="tab" id="randomTab" type="button">Random scramble</button>
+            <button class="tab is-active" id="uploadTab" type="button" role="tab" aria-selected="true" aria-controls="uploadPanel">Upload net</button>
+            <button class="tab" id="randomTab" type="button" role="tab" aria-selected="false" aria-controls="randomPanel">Random scramble</button>
           </div>
 
-          <div class="mode-panel is-active" id="uploadPanel">
+          <div class="mode-panel is-active" id="uploadPanel" role="tabpanel" aria-labelledby="uploadTab">
             <label class="file-drop" id="fileDrop">
               <input id="netImage" type="file" accept="image/png,image/jpeg">
               <span id="fileLabel">Choose, drop, or paste a flattened cube net</span>
@@ -34,7 +34,7 @@
             <p class="hint">The parser expects the 12 by 9 unfolded cube net layout.</p>
           </div>
 
-          <div class="mode-panel" id="randomPanel">
+          <div class="mode-panel" id="randomPanel" role="tabpanel" aria-labelledby="randomTab" hidden>
             <label class="field-label" for="scrambleLength">Scramble length</label>
             <input class="number-input" id="scrambleLength" type="number" min="1" max="80" value="20">
             <button class="primary-action" id="randomButton" type="button">Generate scramble</button>
@@ -43,7 +43,7 @@
 
           <div class="palette" id="palette" aria-label="Sticker color palette"></div>
           <div class="counts" id="counts"></div>
-          <div class="validation-box" id="validationBox">No cube loaded</div>
+          <div class="validation-box" id="validationBox" role="status" aria-live="polite">No cube loaded</div>
           <div class="solver-options" aria-label="Solver quality">
             <span class="field-label">Solver quality</span>
             <div class="quality-options">

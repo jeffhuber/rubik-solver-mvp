@@ -111,6 +111,10 @@ function stickerKey(face, index) {
   return `${face}-${index}`;
 }
 
+function colorLabel(color) {
+  return color ? color.charAt(0).toUpperCase() + color.slice(1) : "Unknown";
+}
+
 function stickerDiagnostics(face, index) {
   return detectionDiagnostics?.stickersByKey?.get(stickerKey(face, index));
 }
@@ -194,17 +198,24 @@ function initPalette() {
     const button = document.createElement("button");
     button.type = "button";
     button.title = color;
+    button.setAttribute("aria-label", `${colorLabel(color)} paint color`);
     button.className = `palette-button color-${color}`;
     button.dataset.color = color;
     button.addEventListener("click", () => {
       selectedColor = color;
-      document.querySelectorAll(".palette-button").forEach((item) => {
-        item.classList.toggle("is-active", item.dataset.color === selectedColor);
-      });
+      updatePaletteSelection();
     });
     palette.appendChild(button);
   });
-  palette.querySelector("[data-color='white']").classList.add("is-active");
+  updatePaletteSelection();
+}
+
+function updatePaletteSelection() {
+  document.querySelectorAll(".palette-button").forEach((item) => {
+    const selected = item.dataset.color === selectedColor;
+    item.classList.toggle("is-active", selected);
+    item.setAttribute("aria-pressed", String(selected));
+  });
 }
 
 function renderCube() {
@@ -220,6 +231,7 @@ function renderCube() {
   DISPLAY_FACE_ORDER.forEach((face) => {
     const faceEl = document.createElement("div");
     faceEl.className = `face face-${face}`;
+    faceEl.setAttribute("role", "group");
     faceEl.setAttribute("aria-label", `${face} face`);
     cubeFaces[face].forEach((color, index) => {
       const diagnostics = stickerDiagnostics(face, index);
@@ -233,6 +245,7 @@ function renderCube() {
       sticker.dataset.stickerKey = key;
       sticker.dataset.label = index === 4 ? face : "";
       sticker.title = stickerTitle(face, index, color, diagnostics);
+      sticker.setAttribute("aria-label", stickerAriaLabel(face, index, color, diagnostics));
       sticker.disabled = !canEditStickers();
       sticker.addEventListener("click", () => {
         if (!canEditStickers()) return;
@@ -266,6 +279,25 @@ function stickerTitle(face, index, color, diagnostics) {
     if (diagnostics.balanced) parts.push(`nearest ${diagnostics.nearestColor}`);
   }
   return parts.join(" - ");
+}
+
+function stickerAriaLabel(face, index, color, diagnostics) {
+  const row = Math.floor(index / 3) + 1;
+  const column = (index % 3) + 1;
+  const parts = [`${face} face, row ${row}, column ${column}`, `${colorLabel(color)} sticker`];
+  if (index === 4) parts.push("center sticker");
+  if (diagnostics?.lowConfidence) {
+    parts.push(`low confidence, ${Math.round(diagnostics.confidence * 100)} percent`);
+  } else if (diagnostics?.confidence !== undefined) {
+    parts.push(`${Math.round(diagnostics.confidence * 100)} percent confidence`);
+  }
+  if (diagnostics?.balanced) {
+    parts.push(`nearest color was ${colorLabel(diagnostics.nearestColor)}`);
+  }
+  if (canEditStickers()) {
+    parts.push("select to repaint with the chosen color");
+  }
+  return parts.join(", ");
 }
 
 function canEditStickers() {
@@ -894,6 +926,7 @@ async function restoreSharedSolutionFromHash() {
       moves: payload.moves,
     });
     const scramble = Array.isArray(payload.scramble) ? payload.scramble : [];
+    setMode(scramble.length ? "random" : "upload");
     setReviewedFaces(
       payload.faces,
       scramble.length ? "Shared scramble" : "Shared solution",
@@ -972,16 +1005,50 @@ function timestampSlug() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function setMode(mode) {
+function setMode(mode, options = {}) {
   const upload = mode === "upload";
-  document.getElementById("uploadPanel").classList.toggle("is-active", upload);
-  document.getElementById("randomPanel").classList.toggle("is-active", !upload);
-  document.getElementById("uploadTab").classList.toggle("is-active", upload);
-  document.getElementById("randomTab").classList.toggle("is-active", !upload);
+  const uploadPanel = document.getElementById("uploadPanel");
+  const randomPanel = document.getElementById("randomPanel");
+  const uploadTab = document.getElementById("uploadTab");
+  const randomTab = document.getElementById("randomTab");
+
+  uploadPanel.classList.toggle("is-active", upload);
+  randomPanel.classList.toggle("is-active", !upload);
+  uploadPanel.hidden = !upload;
+  randomPanel.hidden = upload;
+  uploadPanel.setAttribute("aria-hidden", String(!upload));
+  randomPanel.setAttribute("aria-hidden", String(upload));
+
+  uploadTab.classList.toggle("is-active", upload);
+  randomTab.classList.toggle("is-active", !upload);
+  uploadTab.setAttribute("aria-selected", String(upload));
+  randomTab.setAttribute("aria-selected", String(!upload));
+  uploadTab.tabIndex = upload ? 0 : -1;
+  randomTab.tabIndex = upload ? -1 : 0;
+
+  if (options.focus) {
+    (upload ? uploadTab : randomTab).focus();
+  }
 }
 
 document.getElementById("uploadTab").addEventListener("click", () => setMode("upload"));
 document.getElementById("randomTab").addEventListener("click", () => setMode("random"));
+document.querySelectorAll("[role='tab']").forEach((tab) => {
+  tab.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      setMode(tab.id === "uploadTab" ? "random" : "upload", { focus: true });
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setMode("upload", { focus: true });
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      setMode("random", { focus: true });
+    }
+  });
+});
 document.getElementById("firstStep").addEventListener("click", () => {
   stopPlayback();
   goToStep(0, { animate: false });
@@ -1096,7 +1163,7 @@ function imageFileFromClipboard(event) {
 function isTextInput(target) {
   return (
     target instanceof Element &&
-    Boolean(target.closest("input:not([type='file']), textarea, [contenteditable='true']"))
+    Boolean(target.closest("input:not([type='file']), select, textarea, [contenteditable='true']"))
   );
 }
 
@@ -1139,6 +1206,7 @@ document.addEventListener("rubik3d-ready", () => {
 
 document.addEventListener("keydown", (event) => {
   if (isTextInput(event.target)) return;
+  if (event.target instanceof Element && event.target.closest("[role='tab']")) return;
   if (!solutionStates.length) return;
   if (event.key === "ArrowLeft") {
     event.preventDefault();
@@ -1164,6 +1232,7 @@ document.addEventListener("keydown", (event) => {
 
 initPalette();
 initPlaybackSpeed();
+setMode("upload");
 document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
   input.addEventListener("change", () => {
     qualityHint.textContent = QUALITY_HINTS[selectedSolveQuality()];
