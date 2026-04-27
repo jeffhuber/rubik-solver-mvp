@@ -43,6 +43,24 @@
           <div class="palette" id="palette" aria-label="Sticker color palette"></div>
           <div class="counts" id="counts"></div>
           <div class="validation-box" id="validationBox">No cube loaded</div>
+          <div class="solver-options" aria-label="Solver quality">
+            <span class="field-label">Solver quality</span>
+            <div class="quality-options">
+              <label class="quality-option">
+                <input type="radio" name="solverQuality" value="fast" checked>
+                <span>Fast</span>
+              </label>
+              <label class="quality-option">
+                <input type="radio" name="solverQuality" value="tighter">
+                <span>Tighter</span>
+              </label>
+              <label class="quality-option">
+                <input type="radio" name="solverQuality" value="god20">
+                <span>Try 20</span>
+              </label>
+            </div>
+            <p class="hint" id="qualityHint">Fast returns a short two-phase solution quickly.</p>
+          </div>
           <button class="secondary-action" id="nextFlaggedButton" type="button" disabled>Review flagged sticker</button>
           <button class="solve-action" id="solveButton" type="button" disabled>Solve reviewed state</button>
         </div>
@@ -81,6 +99,7 @@
             <input class="step-range" id="stepRange" type="range" min="0" max="0" value="0" aria-label="Solution step">
           </div>
           <div class="moves" id="moves"></div>
+          <div class="solve-meta" id="solveMeta"></div>
           <ol class="instructions" id="instructions"></ol>
         </div>
       </section>

@@ -5,10 +5,11 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 from rubik_solver.cube import (
     CubeStateError,
+    invert_moves,
     move_to_instruction,
-    random_scramble_state,
+    random_scramble_faces,
     solution_states,
-    solve_faces,
+    solve_faces_with_quality,
     validate_faces_report,
 )
 from rubik_solver.net_parser import NetParseError, parse_image_bytes
@@ -49,21 +50,14 @@ def solve():
     faces = payload.get("faces")
     if not isinstance(faces, dict):
         return _error("Request JSON must include a faces object.", 400)
+    quality = _solver_quality(payload)
 
     try:
-        moves = solve_faces(faces)
+        result = solve_faces_with_quality(faces, quality)
     except CubeStateError as exc:
         return _error(str(exc), 422)
 
-    return jsonify(
-        {
-            "moves": moves,
-            "instructions": [move_to_instruction(move) for move in moves],
-            "moveCount": len(moves),
-            "states": solution_states(faces, moves),
-            "validation": validate_faces_report(faces),
-        }
-    )
+    return jsonify(_solution_payload(faces, result, validation=validate_faces_report(faces)))
 
 
 @app.post("/api/validate")
@@ -79,18 +73,37 @@ def random_state():
         length = int(payload.get("length", 20))
     except (TypeError, ValueError):
         length = 20
+    quality = _solver_quality(payload)
 
-    scramble, faces, solution = random_scramble_state(length)
-    return jsonify(
-        {
-            "scramble": scramble,
-            "faces": faces,
-            "moves": solution,
-            "instructions": [move_to_instruction(move) for move in solution],
-            "moveCount": len(solution),
-            "states": solution_states(faces, solution),
-        }
-    )
+    scramble, faces = random_scramble_faces(length)
+    try:
+        result = solve_faces_with_quality(faces, quality)
+    except CubeStateError:
+        fallback_solution = invert_moves(scramble)
+        return jsonify(
+            {
+                "scramble": scramble,
+                "faces": faces,
+                "moves": fallback_solution,
+                "instructions": [move_to_instruction(move) for move in fallback_solution],
+                "moveCount": len(fallback_solution),
+                "states": solution_states(faces, fallback_solution),
+                "solve": {
+                    "quality": "fast",
+                    "qualityLabel": "Fast fallback",
+                    "maxDepth": 24,
+                    "targetMaxMoves": None,
+                    "usedFallback": True,
+                    "attempts": [],
+                    "message": "Fast fallback solved this generated scramble.",
+                },
+            }
+        )
+
+    payload = _solution_payload(faces, result)
+    payload["scramble"] = scramble
+    payload["faces"] = faces
+    return jsonify(payload)
 
 
 @app.get("/healthz")
@@ -105,6 +118,25 @@ def payload_too_large(_exc):
 
 def _error(message, status):
     return jsonify({"error": message}), status
+
+
+def _solver_quality(payload):
+    quality = payload.get("quality", "fast")
+    return quality if quality in {"fast", "tighter", "god20"} else "fast"
+
+
+def _solution_payload(faces, result, validation=None):
+    moves = result.moves
+    payload = {
+        "moves": moves,
+        "instructions": [move_to_instruction(move) for move in moves],
+        "moveCount": len(moves),
+        "states": solution_states(faces, moves),
+        "solve": result.metadata(),
+    }
+    if validation is not None:
+        payload["validation"] = validation
+    return payload
 
 
 if __name__ == "__main__":

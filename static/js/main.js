@@ -2,6 +2,11 @@ const FACE_ORDER = ["U", "R", "F", "D", "L", "B"];
 const DISPLAY_FACE_ORDER = ["U", "L", "F", "R", "B", "D"];
 const COLORS = ["white", "yellow", "red", "orange", "blue", "green"];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const QUALITY_HINTS = {
+  fast: "Fast returns a short two-phase solution quickly.",
+  tighter: "Tighter first tries to stay within 21 moves, then falls back if needed.",
+  god20: "Try 20 searches harder for a 20-move-or-less solution before falling back.",
+};
 
 let reviewedFaces = null;
 let cubeFaces = null;
@@ -17,6 +22,7 @@ let manualCorrections = new Set();
 let reviewTargetKey = null;
 let isPlaying = false;
 let isStepping = false;
+let isSolving = false;
 let suppressCube3dSync = false;
 
 const statusPill = document.getElementById("statusPill");
@@ -42,6 +48,8 @@ const validationBox = document.getElementById("validationBox");
 const nextFlaggedButton = document.getElementById("nextFlaggedButton");
 const playSteps = document.getElementById("playSteps");
 const stepRange = document.getElementById("stepRange");
+const solveMeta = document.getElementById("solveMeta");
+const qualityHint = document.getElementById("qualityHint");
 
 function cloneFaces(faces) {
   return JSON.parse(JSON.stringify(faces));
@@ -208,7 +216,7 @@ function stickerTitle(face, index, color, diagnostics) {
 }
 
 function canEditStickers() {
-  return solutionStates.length === 0 || currentStep === 0;
+  return !isSolving && (solutionStates.length === 0 || currentStep === 0);
 }
 
 function renderCounts() {
@@ -321,6 +329,8 @@ function clearSolution() {
   movesEl.innerHTML = "";
   instructionsEl.innerHTML = "";
   moveCount.textContent = "";
+  solveMeta.textContent = "";
+  solveMeta.className = "solve-meta";
   stepContext.textContent = reviewedFaces
     ? "Review and correct the starting state before solving."
     : "Load a cube net or random scramble to begin.";
@@ -412,10 +422,12 @@ detectButton.addEventListener("click", detectSelectedImage);
 
 document.getElementById("randomButton").addEventListener("click", async () => {
   const length = Number(document.getElementById("scrambleLength").value || 20);
-  setStatus("Generating...");
+  const quality = selectedSolveQuality();
+  setStatus(statusForQuality(quality));
+  setSolving(true);
   clearSolution();
   try {
-    const data = await postJson("/api/random", { length });
+    const data = await postJson("/api/random", { length, quality });
     setReviewedFaces(data.faces, "Generated scramble");
     scrambleBox.style.display = "block";
     scrambleBox.textContent = data.scramble.join(" ");
@@ -423,15 +435,20 @@ document.getElementById("randomButton").addEventListener("click", async () => {
     setStatus("Generated");
   } catch (error) {
     setStatus(error.message, true);
+  } finally {
+    setSolving(false);
+    renderCube();
   }
 });
 
 solveButton.addEventListener("click", async () => {
   if (!reviewedFaces) return;
-  setStatus("Solving...");
+  const quality = selectedSolveQuality();
+  setStatus(statusForQuality(quality));
+  setSolving(true);
   clearSolution();
   try {
-    const data = await postJson("/api/solve", { faces: reviewedFaces });
+    const data = await postJson("/api/solve", { faces: reviewedFaces, quality });
     validationReport = data.validation || null;
     renderSolution(data);
     setStatus("Solved");
@@ -439,6 +456,9 @@ solveButton.addEventListener("click", async () => {
     validationReport = { issues: [error.message] };
     renderValidationSummary();
     setStatus(error.message, true);
+  } finally {
+    setSolving(false);
+    renderCube();
   }
 });
 
@@ -449,6 +469,7 @@ function renderSolution(data) {
   solutionMoves = data.moves || [];
   solutionInstructions = data.instructions || [];
   moveCount.textContent = `${data.moveCount} moves`;
+  renderSolveMeta(data.solve);
   stepRange.max = Math.max(0, solutionStates.length - 1);
   stepRange.value = 0;
   solutionMoves.forEach((move, index) => {
@@ -480,6 +501,48 @@ function renderSolution(data) {
     stepper.hidden = false;
     goToStep(0, { animate: false });
   }
+}
+
+function renderSolveMeta(solve) {
+  solveMeta.textContent = "";
+  solveMeta.className = "solve-meta";
+  if (!solve) return;
+
+  const attempts = solve.attempts || [];
+  const solved = attempts.find((attempt) => attempt.status === "solved");
+  const totalMs = attempts.reduce((sum, attempt) => sum + (attempt.elapsedMs || 0), 0);
+  const parts = [solve.message || `${solve.qualityLabel || "Solver"} completed.`];
+  if (solved?.elapsedMs !== undefined) {
+    parts.push(`Solved in ${(solved.elapsedMs / 1000).toFixed(1)}s.`);
+  } else if (totalMs) {
+    parts.push(`Searched for ${(totalMs / 1000).toFixed(1)}s.`);
+  }
+  const missed = attempts.filter((attempt) => attempt.status !== "solved");
+  if (missed.length) {
+    parts.push(`${missed.map((attempt) => attempt.label).join(", ")} did not finish.`);
+  }
+  solveMeta.textContent = parts.join(" ");
+  solveMeta.classList.add("is-visible");
+  solveMeta.classList.toggle("is-fallback", Boolean(solve.usedFallback));
+}
+
+function selectedSolveQuality() {
+  return document.querySelector("input[name='solverQuality']:checked")?.value || "fast";
+}
+
+function statusForQuality(quality) {
+  if (quality === "god20") return "Trying 20...";
+  if (quality === "tighter") return "Solving tighter...";
+  return "Solving...";
+}
+
+function setSolving(value) {
+  isSolving = value;
+  detectButton.disabled = value;
+  document.getElementById("randomButton").disabled = value;
+  document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
+    input.disabled = value;
+  });
 }
 
 async function goToStep(step, options = {}) {
@@ -762,4 +825,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 initPalette();
+document.querySelectorAll("input[name='solverQuality']").forEach((input) => {
+  input.addEventListener("change", () => {
+    qualityHint.textContent = QUALITY_HINTS[selectedSolveQuality()];
+  });
+});
+qualityHint.textContent = QUALITY_HINTS[selectedSolveQuality()];
 renderCube();

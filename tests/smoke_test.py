@@ -9,7 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from rubik_solver.constants import COLOR_RGB, FACE_NET_POSITIONS, FACE_ORDER
-from rubik_solver.cube import random_scramble_state, solve_faces, solution_states
+from app import app
+from rubik_solver.cube import (
+    apply_moves,
+    facelets_to_color_faces,
+    random_scramble_state,
+    solve_faces,
+    solve_faces_with_quality,
+    solution_states,
+    solved_facelets,
+)
 from rubik_solver.net_parser import parse_bgr_image, parse_image_file
 
 
@@ -27,6 +36,23 @@ def main() -> int:
     assert_is_solved(solution_states(parsed["faces"], solve_faces(parsed["faces"]))[-1])
     print("Grid:", json.dumps(parsed["grid"]))
     print("Warnings:", parsed["warnings"])
+
+    print("\nSolver quality smoke test")
+    tight_faces = facelets_to_color_faces(apply_moves(solved_facelets(), ["R", "U", "F2", "L'"]))
+    tight_result = solve_faces_with_quality(tight_faces, "god20")
+    assert_is_solved(solution_states(tight_faces, tight_result.moves)[-1])
+    if tight_result.metadata()["quality"] != "god20":
+        raise AssertionError("Solver did not preserve the requested quality profile.")
+    print("Quality:", tight_result.metadata()["message"])
+
+    with app.test_client() as client:
+        response = client.post("/api/solve", json={"faces": tight_faces, "quality": "god20"})
+        if response.status_code != 200:
+            raise AssertionError(f"API solve failed: {response.get_data(as_text=True)}")
+        payload = response.get_json()
+        if payload["solve"]["quality"] != "god20":
+            raise AssertionError("API solve did not return solver quality metadata.")
+        assert_is_solved(payload["states"][-1])
 
     for path in sys.argv[1:]:
         print(f"\nImage parser smoke test: {path}")
