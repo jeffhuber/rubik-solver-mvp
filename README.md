@@ -1,8 +1,10 @@
 # Rubik Solver MVP
 
+Production: [https://rubik-solver-mvp-production.up.railway.app](https://rubik-solver-mvp-production.up.railway.app)
+
 A Railway-ready web MVP for solving a Rubik's Cube from either:
 
-- a random generated scramble, or
+- a randomly generated scramble, or
 - a Ruwix-style flattened six-face cube net screenshot.
 
 The app intentionally starts with structured cube-net images rather than arbitrary cube photos. That keeps the first vision milestone deterministic: all 54 stickers are visible, aligned, and reviewable before solving.
@@ -22,10 +24,20 @@ python app.py
 
 Then open `http://localhost:8080`.
 
-## Test With Example Images
+## Docker Local Run
+
+```bash
+docker build -t rubik-solver-mvp .
+docker run --rm -p 8080:8080 -e PORT=8080 rubik-solver-mvp
+```
+
+Then open `http://localhost:8080`.
+
+## Parse Example Images
 
 ```bash
 python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
+python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg" --solve
 ```
 
 ## Smoke Tests
@@ -34,8 +46,28 @@ python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
 python -m compileall app.py rubik_solver tests
 node --check static/js/main.js
 node --check static/js/cube3d.js
+python tests/smoke_test.py
 python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 ```
+
+## Current Limitations
+
+- The image parser expects a Ruwix-style 12 by 9 unfolded cube net.
+- Uploads must be JPEG or PNG files under 8 MB.
+- Arbitrary cube photos, partial cube photos, and three-face perspective photos are not supported yet.
+- Solver accuracy still depends on reviewing and correcting any flagged stickers before solving.
+
+## Frontend Dependency
+
+Three.js is vendored at `static/vendor/three.module.min.js` and imported locally by `static/js/cube3d.js`. That removes the previous runtime dependency on the `unpkg.com` CDN, so the 3D viewer can load in local and production environments without fetching external JavaScript.
+
+Bundling tradeoffs:
+
+- Better reliability for local/offline demos and production deploys because the app serves a pinned Three.js build itself.
+- More deterministic behavior because upgrades happen only when the vendored file is intentionally refreshed.
+- Slightly larger repository and Docker image size; the current minified module is about 674 KB.
+- No shared browser cache from a public CDN, though normal app static-file caching still applies.
+- Security and bugfix updates are manual: refresh the vendored file, verify the 3D viewer, and keep the license header intact.
 
 ## Railway
 
@@ -43,6 +75,8 @@ Railway should run this app through Docker. The container listens on `$PORT` whe
 
 The active Railway service is connected to the `main` branch.
 New commits to `main` trigger a Railway deployment.
+
+`Dockerfile` and `railway.json` are the deployment source of truth; no Procfile is required.
 
 Suggested Railway setup:
 

@@ -1,4 +1,4 @@
-import * as THREE from "https://unpkg.com/three@0.164.1/build/three.module.js";
+import * as THREE from "../vendor/three.module.min.js";
 
 const COLOR_HEX = {
   white: 0xf8f8f4,
