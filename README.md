@@ -38,8 +38,8 @@ python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 
 Railway should run this app through Docker. The container listens on `$PORT` when provided, with a local fallback of `8080`.
 
-The production Railway service is connected to the `main` branch.
-New commits to `main` should trigger a Railway deployment.
+The active Railway service is connected to the `main` branch.
+New commits to `main` trigger a Railway deployment.
 
 Suggested Railway setup:
 
