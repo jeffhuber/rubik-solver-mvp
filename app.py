@@ -36,7 +36,7 @@ def detect_net():
         return _error("The uploaded image was empty.", 400)
 
     try:
-        result = parse_image_bytes(image_bytes)
+        result = parse_image_bytes(image_bytes, include_debug_image=True)
     except NetParseError as exc:
         return _error(str(exc), 422)
 

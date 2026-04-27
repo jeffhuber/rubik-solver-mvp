@@ -30,6 +30,7 @@
               <small id="uploadMeta">JPEG or PNG under 8 MB</small>
             </label>
             <button class="primary-action" id="detectButton" type="button">Detect stickers</button>
+            <button class="secondary-action" id="debugOverlayButton" type="button" disabled>Show parser overlay</button>
             <p class="hint">The parser expects the 12 by 9 unfolded cube net layout.</p>
           </div>
 
@@ -78,6 +79,13 @@
             <div class="cube-3d" id="cube3d">
               <canvas id="cube3dCanvas" aria-label="3D cube view"></canvas>
             </div>
+          </div>
+          <div class="parser-debug" id="parserDebug" hidden>
+            <div class="parser-debug-header">
+              <strong>Parser Overlay</strong>
+              <span id="parserDebugMeta"></span>
+            </div>
+            <img id="parserDebugImage" alt="Detected cube net grid and sticker sample boxes">
           </div>
         </div>
 

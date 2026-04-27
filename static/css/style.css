@@ -416,6 +416,35 @@ h2 {
   height: 100%;
 }
 
+.parser-debug {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+  margin-top: 14px;
+  padding: 10px;
+}
+
+.parser-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.parser-debug-header strong {
+  color: var(--ink);
+}
+
+.parser-debug img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .face {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

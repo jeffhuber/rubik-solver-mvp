@@ -40,6 +40,7 @@ const stepper = document.getElementById("stepper");
 const stepLabel = document.getElementById("stepLabel");
 const stepMove = document.getElementById("stepMove");
 const detectButton = document.getElementById("detectButton");
+const debugOverlayButton = document.getElementById("debugOverlayButton");
 const fileDrop = document.getElementById("fileDrop");
 const fileLabel = document.getElementById("fileLabel");
 const netImage = document.getElementById("netImage");
@@ -50,6 +51,9 @@ const playSteps = document.getElementById("playSteps");
 const stepRange = document.getElementById("stepRange");
 const solveMeta = document.getElementById("solveMeta");
 const qualityHint = document.getElementById("qualityHint");
+const parserDebug = document.getElementById("parserDebug");
+const parserDebugImage = document.getElementById("parserDebugImage");
+const parserDebugMeta = document.getElementById("parserDebugMeta");
 
 function cloneFaces(faces) {
   return JSON.parse(JSON.stringify(faces));
@@ -92,6 +96,7 @@ function clearDetectionDiagnostics() {
   validationReport = null;
   manualCorrections = new Set();
   reviewTargetKey = null;
+  clearParserDebug();
   renderFlaggedControl();
 }
 
@@ -119,6 +124,7 @@ function validateImageFile(file) {
 function setSelectedNetFile(file, sourceLabel) {
   validateImageFile(file);
   selectedNetFile = file;
+  clearParserDebug();
   const name = file.name || "clipboard image";
   fileLabel.textContent = `${sourceLabel}: ${name}`;
   uploadMeta.textContent = `${formatBytes(file.size)} image ready`;
@@ -381,6 +387,9 @@ function detectionMeta(data) {
       parts.push(`${data.diagnostics.lowConfidenceStickers} low confidence`);
     }
   }
+  if (data.debug?.detectionSource && data.debug.detectionSource !== "original") {
+    parts.push(data.debug.detectionSource);
+  }
   if (data.warnings && data.warnings.length) parts.push(data.warnings.join(" "));
   return parts.join(" - ") || "Detected from image";
 }
@@ -401,11 +410,13 @@ async function detectSelectedImage() {
   setStatus("Detecting...");
   detectButton.disabled = true;
   clearSolution();
+  clearParserDebug();
   try {
     const response = await fetch("/api/detect-net", { method: "POST", body });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.error || "Detection failed");
     setReviewedFaces(data.faces, detectionMeta(data), data.diagnostics, data.validation);
+    setParserDebug(data.debug);
     updateUploadDiagnostics(data);
     scrambleBox.style.display = "none";
     setStatus("Detected");
@@ -419,6 +430,10 @@ async function detectSelectedImage() {
 }
 
 detectButton.addEventListener("click", detectSelectedImage);
+debugOverlayButton.addEventListener("click", () => {
+  parserDebug.hidden = !parserDebug.hidden;
+  debugOverlayButton.textContent = parserDebug.hidden ? "Show parser overlay" : "Hide parser overlay";
+});
 
 document.getElementById("randomButton").addEventListener("click", async () => {
   const length = Number(document.getElementById("scrambleLength").value || 20);
@@ -718,6 +733,7 @@ netImage.addEventListener("change", (event) => {
     fileLabel.textContent = "Choose, drop, or paste a flattened cube net";
     uploadMeta.textContent = "JPEG or PNG under 8 MB";
     uploadMeta.classList.remove("is-warning");
+    clearParserDebug();
   }
 });
 
@@ -795,6 +811,31 @@ function syncCube3d() {
   if (window.Rubik3D?.setFaces) {
     window.Rubik3D.setFaces(cubeFaces);
   }
+}
+
+function setParserDebug(debug) {
+  if (!debug?.overlayImage) {
+    clearParserDebug();
+    return;
+  }
+  parserDebugImage.src = debug.overlayImage;
+  parserDebug.hidden = true;
+  debugOverlayButton.disabled = false;
+  debugOverlayButton.textContent = "Show parser overlay";
+  const crop = debug.crop;
+  const cropText =
+    crop && debug.detectionSource !== "original"
+      ? `crop ${crop.width}x${crop.height} @ ${crop.x},${crop.y}`
+      : "full image";
+  parserDebugMeta.textContent = `${debug.detectionSource || "original"} - ${cropText}`;
+}
+
+function clearParserDebug() {
+  parserDebug.hidden = true;
+  parserDebugImage.removeAttribute("src");
+  parserDebugMeta.textContent = "";
+  debugOverlayButton.disabled = true;
+  debugOverlayButton.textContent = "Show parser overlay";
 }
 
 document.addEventListener("rubik3d-ready", syncCube3d);

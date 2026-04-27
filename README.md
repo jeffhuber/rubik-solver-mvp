@@ -11,7 +11,7 @@ The app intentionally starts with structured cube-net images rather than arbitra
 
 Flattened net screenshots can be selected with the file picker, dragged onto the upload target, or pasted from the clipboard.
 
-After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, selectable solver quality, a move timeline, keyboard step-through controls, and a live Three.js cube view with animated layer turns.
+After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a parser debug overlay, selectable solver quality, a move timeline, keyboard step-through controls, and a live Three.js cube view with animated layer turns.
 
 ## Local Development
 
@@ -38,6 +38,7 @@ Then open `http://localhost:8080`.
 ```bash
 python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
 python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg" --solve
+python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg" --debug-overlay /tmp/parser-overlay.png
 ```
 
 ## Smoke Tests
@@ -57,6 +58,7 @@ python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 - Arbitrary cube photos, partial cube photos, and three-face perspective photos are not supported yet.
 - Solver accuracy still depends on reviewing and correcting any flagged stickers before solving.
 - The "Try 20" solver mode is bounded by a timeout. It commonly finds a 20-move-or-less solution, but falls back to a faster solve if the tighter search does not finish.
+- Parser detection now retries against cropped image candidates and exposes a visual overlay, but it still needs visible sticker borders or a clean Ruwix-style net structure.
 
 ## Licensing
 

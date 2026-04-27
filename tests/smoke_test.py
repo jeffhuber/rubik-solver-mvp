@@ -37,6 +37,14 @@ def main() -> int:
     print("Grid:", json.dumps(parsed["grid"]))
     print("Warnings:", parsed["warnings"])
 
+    print("\nLarge-margin parser regression test")
+    margin_parsed = parse_bgr_image(render_large_margin_net(faces), include_debug_image=True)
+    if margin_parsed["faces"] != faces:
+        raise AssertionError("Large-margin parser did not recover the rendered cube state.")
+    if not margin_parsed["debug"]["overlayImage"].startswith("data:image/png;base64,"):
+        raise AssertionError("Parser debug overlay was not returned as a PNG data URL.")
+    print("Detection source:", margin_parsed["debug"]["detectionSource"])
+
     print("\nSolver quality smoke test")
     tight_faces = facelets_to_color_faces(apply_moves(solved_facelets(), ["R", "U", "F2", "L'"]))
     tight_result = solve_faces_with_quality(tight_faces, "god20")
@@ -102,6 +110,25 @@ def render_synthetic_ruwix_net(faces):
 
     cv2.rectangle(image, (width - 118, 18), (width - 20, 58), (222, 235, 250), thickness=-1)
     cv2.putText(image, "Scan", (width - 96, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
+    return image
+
+
+def render_large_margin_net(faces):
+    net = render_synthetic_ruwix_net(faces)
+    margin_top = 360
+    margin_left = 680
+    margin_right = 520
+    margin_bottom = 260
+    image = np.full(
+        (
+            net.shape[0] + margin_top + margin_bottom,
+            net.shape[1] + margin_left + margin_right,
+            3,
+        ),
+        245,
+        dtype=np.uint8,
+    )
+    image[margin_top : margin_top + net.shape[0], margin_left : margin_left + net.shape[1]] = net
     return image
 
 
