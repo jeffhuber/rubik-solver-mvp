@@ -57,6 +57,12 @@ python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 - Arbitrary cube photos, partial cube photos, and three-face perspective photos are not supported yet.
 - Solver accuracy still depends on reviewing and correcting any flagged stickers before solving.
 
+## Licensing
+
+Original application code in this repository is licensed under the MIT License; see `LICENSE`.
+
+Third-party software remains under its own licenses; see `THIRD_PARTY_NOTICES.md`. In particular, the current `kociemba` solver dependency is GPLv2, so review that license before redistributing packaged copies, binaries, Docker images, or modified dependency code.
+
 ## Frontend Dependency
 
 Three.js is vendored at `static/vendor/three.module.min.js` and imported locally by `static/js/cube3d.js`. That removes the previous runtime dependency on the `unpkg.com` CDN, so the 3D viewer can load in local and production environments without fetching external JavaScript.
