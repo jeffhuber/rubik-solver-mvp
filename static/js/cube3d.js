@@ -18,6 +18,22 @@ const DEFAULT_FACES = {
   B: Array(9).fill("green"),
 };
 
+const MOVE_DEFINITIONS = {
+  U: { axis: "y", layer: 1, axisSign: 1 },
+  D: { axis: "y", layer: -1, axisSign: -1 },
+  R: { axis: "x", layer: 1, axisSign: 1 },
+  L: { axis: "x", layer: -1, axisSign: -1 },
+  F: { axis: "z", layer: 1, axisSign: 1 },
+  B: { axis: "z", layer: -1, axisSign: -1 },
+};
+
+const FACE_ORDER = ["U", "R", "F", "D", "L", "B"];
+const CUBIE_SPACING = 1.03;
+const CUBIE_SIZE = 0.96;
+const STICKER_SIZE = 0.72;
+const STICKER_OFFSET = 0.492;
+const TURN_DURATION_MS = 520;
+
 const canvas = document.getElementById("cube3dCanvas");
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
@@ -28,8 +44,14 @@ const renderer = new THREE.WebGLRenderer({
   preserveDrawingBuffer: true,
 });
 const cubeGroup = new THREE.Group();
+const cubies = [];
 const stickerMaterials = new Map();
+const bodyMaterial = new THREE.MeshStandardMaterial({
+  color: 0x121820,
+  roughness: 0.66,
+});
 
+let activeTurn = null;
 let isDragging = false;
 let lastPointer = { x: 0, y: 0 };
 
@@ -43,71 +65,103 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(5, 7, 4);
 scene.add(keyLight);
 
-cubeGroup.rotation.set(-0.45, 0.68, 0.08);
+cubeGroup.rotation.set(0, 0, 0);
 scene.add(cubeGroup);
 
 buildCube();
-setFaces(DEFAULT_FACES);
+applyFaces(DEFAULT_FACES);
 resize();
 animate();
 
-window.Rubik3D = { setFaces };
+window.Rubik3D = {
+  animateMove,
+  isAnimating: () => Boolean(activeTurn),
+  setFaces,
+};
 document.dispatchEvent(new Event("rubik3d-ready"));
 
 function buildCube() {
-  ["U", "R", "F", "D", "L", "B"].forEach((face) => {
-    for (let index = 0; index < 9; index += 1) {
-      const group = new THREE.Group();
-      const row = Math.floor(index / 3);
-      const col = index % 3;
+  const cubieByCoord = new Map();
+  for (let x = -1; x <= 1; x += 1) {
+    for (let y = -1; y <= 1; y += 1) {
+      for (let z = -1; z <= 1; z += 1) {
+        const group = new THREE.Group();
+        const core = new THREE.Mesh(new THREE.BoxGeometry(CUBIE_SIZE, CUBIE_SIZE, CUBIE_SIZE), bodyMaterial);
+        group.add(core);
+        group.position.set(x * CUBIE_SPACING, y * CUBIE_SPACING, z * CUBIE_SPACING);
+        cubeGroup.add(group);
 
-      const backing = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.94, 0.94),
-        new THREE.MeshStandardMaterial({ color: 0x121820, roughness: 0.62 })
-      );
+        const cubie = { coord: { x, y, z }, group };
+        cubies.push(cubie);
+        cubieByCoord.set(coordKey(x, y, z), cubie);
+      }
+    }
+  }
+
+  FACE_ORDER.forEach((face) => {
+    for (let index = 0; index < 9; index += 1) {
+      const placement = facePlacement(face, index);
+      const cubie = cubieByCoord.get(coordKey(placement.coord.x, placement.coord.y, placement.coord.z));
+      if (!cubie) continue;
       const material = new THREE.MeshStandardMaterial({
         color: COLOR_HEX.white,
-        roughness: 0.48,
         metalness: 0.02,
+        roughness: 0.45,
+        side: THREE.DoubleSide,
       });
-      const sticker = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.78), material);
-      sticker.position.z = 0.012;
-
-      group.add(backing);
-      group.add(sticker);
-      placeSticker(group, face, row, col);
-      cubeGroup.add(group);
+      const sticker = new THREE.Mesh(new THREE.PlaneGeometry(STICKER_SIZE, STICKER_SIZE), material);
+      sticker.position.copy(placement.position);
+      sticker.rotation.copy(placement.rotation);
+      cubie.group.add(sticker);
       stickerMaterials.set(`${face}-${index}`, material);
     }
   });
 }
 
-function placeSticker(group, face, row, col) {
-  const offset = 1.51;
+function facePlacement(face, index) {
+  const row = Math.floor(index / 3);
+  const col = index % 3;
   const x = col - 1;
   const y = 1 - row;
+  const rotation = new THREE.Euler();
+  const position = new THREE.Vector3();
+  let coord;
 
   if (face === "F") {
-    group.position.set(x, y, offset);
+    coord = { x, y, z: 1 };
+    position.set(0, 0, STICKER_OFFSET);
   } else if (face === "B") {
-    group.position.set(1 - col, y, -offset);
-    group.rotation.y = Math.PI;
+    coord = { x: 1 - col, y, z: -1 };
+    position.set(0, 0, -STICKER_OFFSET);
+    rotation.y = Math.PI;
   } else if (face === "R") {
-    group.position.set(offset, y, 1 - col);
-    group.rotation.y = Math.PI / 2;
+    coord = { x: 1, y, z: 1 - col };
+    position.set(STICKER_OFFSET, 0, 0);
+    rotation.y = Math.PI / 2;
   } else if (face === "L") {
-    group.position.set(-offset, y, col - 1);
-    group.rotation.y = -Math.PI / 2;
+    coord = { x: -1, y, z: col - 1 };
+    position.set(-STICKER_OFFSET, 0, 0);
+    rotation.y = -Math.PI / 2;
   } else if (face === "U") {
-    group.position.set(x, offset, row - 1);
-    group.rotation.x = -Math.PI / 2;
-  } else if (face === "D") {
-    group.position.set(x, -offset, 1 - row);
-    group.rotation.x = Math.PI / 2;
+    coord = { x, y: 1, z: row - 1 };
+    position.set(0, STICKER_OFFSET, 0);
+    rotation.x = -Math.PI / 2;
+  } else {
+    coord = { x, y: -1, z: 1 - row };
+    position.set(0, -STICKER_OFFSET, 0);
+    rotation.x = Math.PI / 2;
   }
+
+  return { coord, position, rotation };
 }
 
 function setFaces(faces) {
+  finishActiveTurn(false);
+  applyFaces(faces || DEFAULT_FACES);
+}
+
+function applyFaces(faces) {
+  resetCubies();
   const nextFaces = faces || DEFAULT_FACES;
   Object.entries(nextFaces).forEach(([face, stickers]) => {
     stickers.forEach((color, index) => {
@@ -119,6 +173,72 @@ function setFaces(faces) {
   });
 }
 
+function resetCubies() {
+  cubies.forEach((cubie) => {
+    cubeGroup.attach(cubie.group);
+    cubie.group.position.set(
+      cubie.coord.x * CUBIE_SPACING,
+      cubie.coord.y * CUBIE_SPACING,
+      cubie.coord.z * CUBIE_SPACING
+    );
+    cubie.group.rotation.set(0, 0, 0);
+    cubie.group.scale.set(1, 1, 1);
+    cubie.group.updateMatrixWorld();
+  });
+}
+
+function animateMove(move, nextFaces) {
+  const info = moveInfo(move);
+  if (!info) {
+    setFaces(nextFaces);
+    return Promise.resolve();
+  }
+
+  finishActiveTurn(true);
+  const layerGroup = new THREE.Group();
+  cubeGroup.add(layerGroup);
+
+  const movingCubies = cubies.filter((cubie) => cubie.coord[info.axis] === info.layer);
+  movingCubies.forEach((cubie) => {
+    layerGroup.attach(cubie.group);
+  });
+
+  return new Promise((resolve) => {
+    activeTurn = {
+      axis: info.axis,
+      layerGroup,
+      movingCubies,
+      nextFaces: nextFaces || DEFAULT_FACES,
+      resolve,
+      startedAt: performance.now(),
+      targetAngle: info.angle,
+    };
+  });
+}
+
+function moveInfo(move) {
+  if (!move || !MOVE_DEFINITIONS[move[0]]) return null;
+  const definition = MOVE_DEFINITIONS[move[0]];
+  let angle = -definition.axisSign * (Math.PI / 2);
+  if (move.endsWith("'")) angle *= -1;
+  if (move.endsWith("2")) angle *= 2;
+  return { ...definition, angle };
+}
+
+function finishActiveTurn(applyFinalFaces) {
+  if (!activeTurn) return;
+  activeTurn.layerGroup.rotation[activeTurn.axis] = activeTurn.targetAngle;
+  activeTurn.movingCubies.forEach((cubie) => {
+    cubeGroup.attach(cubie.group);
+  });
+  cubeGroup.remove(activeTurn.layerGroup);
+
+  const { nextFaces, resolve } = activeTurn;
+  activeTurn = null;
+  if (applyFinalFaces) applyFaces(nextFaces);
+  if (resolve) resolve();
+}
+
 function resize() {
   const parent = canvas.parentElement;
   const width = Math.max(1, parent.clientWidth);
@@ -128,10 +248,22 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-function animate() {
+function animate(now = performance.now()) {
   requestAnimationFrame(animate);
-  if (!isDragging) cubeGroup.rotation.y += 0.003;
+  if (activeTurn) {
+    const progress = Math.min(1, (now - activeTurn.startedAt) / TURN_DURATION_MS);
+    activeTurn.layerGroup.rotation[activeTurn.axis] = activeTurn.targetAngle * easeInOutCubic(progress);
+    if (progress >= 1) finishActiveTurn(true);
+  }
   renderer.render(scene, camera);
+}
+
+function easeInOutCubic(value) {
+  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function coordKey(x, y, z) {
+  return `${x},${y},${z}`;
 }
 
 canvas.addEventListener("pointerdown", (event) => {

@@ -15,7 +15,9 @@ let detectionDiagnostics = null;
 let validationReport = null;
 let manualCorrections = new Set();
 let reviewTargetKey = null;
-let playTimer = null;
+let isPlaying = false;
+let isStepping = false;
+let suppressCube3dSync = false;
 
 const statusPill = document.getElementById("statusPill");
 const cubeNet = document.getElementById("cubeNet");
@@ -153,6 +155,7 @@ function renderCube() {
     cubeNet.innerHTML = "";
     solveButton.disabled = true;
     renderCounts();
+    syncCube3d();
     return;
   }
 
@@ -454,7 +457,10 @@ function renderSolution(data) {
     chip.className = "move-chip";
     chip.textContent = move;
     chip.title = `Jump to step ${index + 1}`;
-    chip.addEventListener("click", () => goToStep(index + 1));
+    chip.addEventListener("click", () => {
+      stopPlayback();
+      goToStep(index + 1, { animate: Math.abs(currentStep - (index + 1)) === 1 });
+    });
     movesEl.appendChild(chip);
   });
   solutionInstructions.forEach((instruction, index) => {
@@ -463,48 +469,98 @@ function renderSolution(data) {
     button.type = "button";
     button.className = "instruction-button";
     button.textContent = instruction;
-    button.addEventListener("click", () => goToStep(index + 1));
+    button.addEventListener("click", () => {
+      stopPlayback();
+      goToStep(index + 1, { animate: Math.abs(currentStep - (index + 1)) === 1 });
+    });
     item.appendChild(button);
     instructionsEl.appendChild(item);
   });
   if (solutionStates.length) {
     stepper.hidden = false;
-    goToStep(0);
+    goToStep(0, { animate: false });
   }
 }
 
-function goToStep(step) {
+async function goToStep(step, options = {}) {
   if (!solutionStates.length) return;
-  currentStep = Math.max(0, Math.min(step, solutionStates.length - 1));
+  if (isStepping) return;
+
+  const previousStep = currentStep;
+  const targetStep = Math.max(0, Math.min(step, solutionStates.length - 1));
+  const isAdjacent = Math.abs(targetStep - previousStep) === 1;
+  const shouldAnimate =
+    options.animate !== false && isAdjacent && Boolean(window.Rubik3D?.animateMove);
+  const move =
+    targetStep > previousStep
+      ? solutionMoves[previousStep]
+      : targetStep < previousStep
+        ? invertMove(solutionMoves[targetStep])
+        : null;
+
+  currentStep = targetStep;
   cubeFaces = cloneFaces(solutionStates[currentStep]);
-  if (currentStep === solutionStates.length - 1) stopPlayback();
+  if (currentStep === solutionStates.length - 1 && !options.fromPlayback) stopPlayback();
+  suppressCube3dSync = shouldAnimate;
   renderCube();
   renderPlaybackControls();
+  suppressCube3dSync = false;
+
+  if (!shouldAnimate || !move) {
+    syncCube3d();
+    return;
+  }
+
+  isStepping = true;
+  renderPlaybackControls();
+  try {
+    await window.Rubik3D.animateMove(move, cubeFaces);
+  } finally {
+    isStepping = false;
+    renderPlaybackControls();
+  }
 }
 
 function togglePlayback() {
   if (!solutionStates.length) return;
-  if (playTimer) {
+  if (isPlaying) {
     stopPlayback();
-    renderPlaybackControls();
     return;
   }
-  if (currentStep === solutionStates.length - 1) goToStep(0);
-  playTimer = window.setInterval(() => {
-    if (currentStep >= solutionStates.length - 1) {
-      stopPlayback();
-      renderPlaybackControls();
-      return;
-    }
-    goToStep(currentStep + 1);
-  }, 850);
+  runPlayback();
+}
+
+async function runPlayback() {
+  if (isStepping) return;
+  isPlaying = true;
+  renderPlaybackControls();
+  if (currentStep === solutionStates.length - 1) {
+    await goToStep(0, { animate: false, fromPlayback: true });
+  }
+  while (isPlaying && currentStep < solutionStates.length - 1) {
+    await goToStep(currentStep + 1, { animate: true, fromPlayback: true });
+    await delay(120);
+  }
+  isPlaying = false;
   renderPlaybackControls();
 }
 
 function stopPlayback() {
-  if (!playTimer) return;
-  window.clearInterval(playTimer);
-  playTimer = null;
+  isPlaying = false;
+  renderPlaybackControls();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function invertMove(move) {
+  if (!move) return move;
+  if (move.endsWith("2")) return move;
+  if (move.endsWith("'")) return move[0];
+  return `${move}'`;
 }
 
 function renderPlaybackControls() {
@@ -527,20 +583,23 @@ function renderPlaybackControls() {
       ? "Starting state. You can still correct stickers here."
       : "Playback mode. Use the arrows or click a move to inspect the cube.";
 
-  document.getElementById("firstStep").disabled = currentStep === 0;
-  document.getElementById("prevStep").disabled = currentStep === 0;
-  document.getElementById("nextStep").disabled = currentStep === solutionStates.length - 1;
-  document.getElementById("lastStep").disabled = currentStep === solutionStates.length - 1;
-  playSteps.disabled = solutionStates.length <= 1;
-  playSteps.textContent = playTimer ? "Pause" : "Play";
+  document.getElementById("firstStep").disabled = isStepping || currentStep === 0;
+  document.getElementById("prevStep").disabled = isStepping || currentStep === 0;
+  document.getElementById("nextStep").disabled = isStepping || currentStep === solutionStates.length - 1;
+  document.getElementById("lastStep").disabled = isStepping || currentStep === solutionStates.length - 1;
+  playSteps.disabled = solutionStates.length <= 1 || (isStepping && !isPlaying);
+  playSteps.textContent = isPlaying ? "Pause" : "Play";
   stepRange.max = solutionStates.length - 1;
   stepRange.value = currentStep;
+  stepRange.disabled = isStepping;
 
   document.querySelectorAll(".move-chip").forEach((chip, index) => {
     chip.classList.toggle("is-active", currentStep === index + 1);
+    chip.disabled = isStepping;
   });
   document.querySelectorAll(".instruction-button").forEach((button, index) => {
     button.classList.toggle("is-active", currentStep === index + 1);
+    button.disabled = isStepping;
   });
 }
 
@@ -554,14 +613,27 @@ function setMode(mode) {
 
 document.getElementById("uploadTab").addEventListener("click", () => setMode("upload"));
 document.getElementById("randomTab").addEventListener("click", () => setMode("random"));
-document.getElementById("firstStep").addEventListener("click", () => goToStep(0));
-document.getElementById("prevStep").addEventListener("click", () => goToStep(currentStep - 1));
-document.getElementById("nextStep").addEventListener("click", () => goToStep(currentStep + 1));
+document.getElementById("firstStep").addEventListener("click", () => {
+  stopPlayback();
+  goToStep(0, { animate: false });
+});
+document.getElementById("prevStep").addEventListener("click", () => {
+  stopPlayback();
+  goToStep(currentStep - 1, { animate: true });
+});
+document.getElementById("nextStep").addEventListener("click", () => {
+  stopPlayback();
+  goToStep(currentStep + 1, { animate: true });
+});
 document.getElementById("lastStep").addEventListener("click", () => {
-  if (solutionStates.length) goToStep(solutionStates.length - 1);
+  stopPlayback();
+  if (solutionStates.length) goToStep(solutionStates.length - 1, { animate: false });
 });
 playSteps.addEventListener("click", togglePlayback);
-stepRange.addEventListener("input", () => goToStep(Number(stepRange.value)));
+stepRange.addEventListener("input", () => {
+  stopPlayback();
+  goToStep(Number(stepRange.value), { animate: false });
+});
 nextFlaggedButton.addEventListener("click", () => {
   const flagged = flaggedStickers();
   if (!flagged.length) return;
@@ -656,6 +728,7 @@ function isTextInput(target) {
 }
 
 function syncCube3d() {
+  if (suppressCube3dSync) return;
   if (window.Rubik3D?.setFaces) {
     window.Rubik3D.setFaces(cubeFaces);
   }
@@ -668,19 +741,23 @@ document.addEventListener("keydown", (event) => {
   if (!solutionStates.length) return;
   if (event.key === "ArrowLeft") {
     event.preventDefault();
-    goToStep(currentStep - 1);
+    stopPlayback();
+    goToStep(currentStep - 1, { animate: true });
   }
   if (event.key === "ArrowRight") {
     event.preventDefault();
-    goToStep(currentStep + 1);
+    stopPlayback();
+    goToStep(currentStep + 1, { animate: true });
   }
   if (event.key === "Home") {
     event.preventDefault();
-    goToStep(0);
+    stopPlayback();
+    goToStep(0, { animate: false });
   }
   if (event.key === "End") {
     event.preventDefault();
-    goToStep(solutionStates.length - 1);
+    stopPlayback();
+    goToStep(solutionStates.length - 1, { animate: false });
   }
 });
 

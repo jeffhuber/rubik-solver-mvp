@@ -9,7 +9,7 @@ The app intentionally starts with structured cube-net images rather than arbitra
 
 Flattened net screenshots can be selected with the file picker, dragged onto the upload target, or pasted from the clipboard.
 
-After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a move timeline, keyboard step-through controls, and a live Three.js cube view.
+After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a move timeline, keyboard step-through controls, and a live Three.js cube view with animated layer turns.
 
 ## Local Development
 
