@@ -11,6 +11,11 @@ let solutionStates = [];
 let solutionMoves = [];
 let solutionInstructions = [];
 let currentStep = 0;
+let detectionDiagnostics = null;
+let validationReport = null;
+let manualCorrections = new Set();
+let reviewTargetKey = null;
+let playTimer = null;
 
 const statusPill = document.getElementById("statusPill");
 const cubeNet = document.getElementById("cubeNet");
@@ -32,6 +37,9 @@ const fileLabel = document.getElementById("fileLabel");
 const netImage = document.getElementById("netImage");
 const uploadMeta = document.getElementById("uploadMeta");
 const validationBox = document.getElementById("validationBox");
+const nextFlaggedButton = document.getElementById("nextFlaggedButton");
+const playSteps = document.getElementById("playSteps");
+const stepRange = document.getElementById("stepRange");
 
 function cloneFaces(faces) {
   return JSON.parse(JSON.stringify(faces));
@@ -40,6 +48,41 @@ function cloneFaces(faces) {
 function setStatus(message, isError = false) {
   statusPill.textContent = message;
   statusPill.classList.toggle("is-error", isError);
+}
+
+function stickerKey(face, index) {
+  return `${face}-${index}`;
+}
+
+function stickerDiagnostics(face, index) {
+  return detectionDiagnostics?.stickersByKey?.get(stickerKey(face, index));
+}
+
+function flaggedStickers() {
+  if (!detectionDiagnostics) return [];
+  return detectionDiagnostics.stickers.filter((sticker) => {
+    const key = stickerKey(sticker.face, sticker.index);
+    return !manualCorrections.has(key) && (sticker.lowConfidence || sticker.balanced);
+  });
+}
+
+function setDetectionDiagnostics(diagnostics) {
+  const stickers = diagnostics?.stickers || [];
+  detectionDiagnostics = {
+    ...diagnostics,
+    stickers,
+    stickersByKey: new Map(stickers.map((sticker) => [stickerKey(sticker.face, sticker.index), sticker])),
+  };
+  reviewTargetKey = null;
+  manualCorrections = new Set();
+}
+
+function clearDetectionDiagnostics() {
+  detectionDiagnostics = null;
+  validationReport = null;
+  manualCorrections = new Set();
+  reviewTargetKey = null;
+  renderFlaggedControl();
 }
 
 function formatBytes(bytes) {
@@ -118,11 +161,17 @@ function renderCube() {
     faceEl.className = `face face-${face}`;
     faceEl.setAttribute("aria-label", `${face} face`);
     cubeFaces[face].forEach((color, index) => {
+      const diagnostics = stickerDiagnostics(face, index);
+      const key = stickerKey(face, index);
       const sticker = document.createElement("button");
       sticker.type = "button";
       sticker.className = `sticker color-${color}`;
+      sticker.classList.toggle("is-low-confidence", Boolean(diagnostics?.lowConfidence));
+      sticker.classList.toggle("is-balanced", Boolean(diagnostics?.balanced));
+      sticker.classList.toggle("is-review-target", reviewTargetKey === key);
+      sticker.dataset.stickerKey = key;
       sticker.dataset.label = index === 4 ? face : "";
-      sticker.title = `${face}${index + 1}: ${color}`;
+      sticker.title = stickerTitle(face, index, color, diagnostics);
       sticker.disabled = !canEditStickers();
       sticker.addEventListener("click", () => {
         if (!canEditStickers()) return;
@@ -130,6 +179,9 @@ function renderCube() {
         if (!reviewedFaces) reviewedFaces = cloneFaces(cubeFaces);
         reviewedFaces[face][index] = selectedColor;
         cubeFaces[face][index] = selectedColor;
+        manualCorrections.add(key);
+        if (reviewTargetKey === key) reviewTargetKey = null;
+        validationReport = null;
         renderCube();
       });
       faceEl.appendChild(sticker);
@@ -137,8 +189,19 @@ function renderCube() {
     cubeNet.appendChild(faceEl);
   });
 
-  solveButton.disabled = !hasValidCounts();
+  solveButton.disabled = !hasValidCounts() || !canEditStickers();
   renderCounts();
+  renderFlaggedControl();
+  syncCube3d();
+}
+
+function stickerTitle(face, index, color, diagnostics) {
+  const parts = [`${face}${index + 1}: ${color}`];
+  if (diagnostics) {
+    parts.push(`confidence ${Math.round(diagnostics.confidence * 100)}%`);
+    if (diagnostics.balanced) parts.push(`nearest ${diagnostics.nearestColor}`);
+  }
+  return parts.join(" - ");
 }
 
 function canEditStickers() {
@@ -204,7 +267,9 @@ function cubeValidationIssues() {
 function renderValidationSummary() {
   validationBox.innerHTML = "";
   const issues = cubeValidationIssues();
+  const flagged = flaggedStickers();
   validationBox.classList.toggle("is-error", cubeFaces && issues.length > 0);
+  validationBox.classList.toggle("is-ready", cubeFaces && !issues.length);
 
   if (!cubeFaces) {
     validationBox.textContent = "No cube loaded";
@@ -212,18 +277,39 @@ function renderValidationSummary() {
   }
 
   if (!issues.length) {
-    validationBox.textContent = "Counts and centers look ready.";
-    return;
+    const line = document.createElement("div");
+    line.textContent = flagged.length
+      ? `Counts and centers look ready. ${flagged.length} detected stickers are flagged for review.`
+      : "Counts and centers look ready.";
+    validationBox.appendChild(line);
+  } else {
+    issues.forEach((issue) => {
+      const line = document.createElement("div");
+      line.textContent = issue;
+      validationBox.appendChild(line);
+    });
   }
 
-  issues.forEach((issue) => {
-    const line = document.createElement("div");
-    line.textContent = issue;
-    validationBox.appendChild(line);
-  });
+  if (validationReport?.issues?.length) {
+    validationReport.issues.forEach((issue) => {
+      if (issues.includes(issue)) return;
+      const line = document.createElement("div");
+      line.textContent = issue;
+      validationBox.appendChild(line);
+    });
+  }
+}
+
+function renderFlaggedControl() {
+  const flagged = flaggedStickers();
+  nextFlaggedButton.disabled = !flagged.length || !canEditStickers();
+  nextFlaggedButton.textContent = flagged.length
+    ? `Review flagged sticker (${flagged.length})`
+    : "Review flagged sticker";
 }
 
 function clearSolution() {
+  stopPlayback();
   solutionStates = [];
   solutionMoves = [];
   solutionInstructions = [];
@@ -236,12 +322,18 @@ function clearSolution() {
     ? "Review and correct the starting state before solving."
     : "Load a cube net or random scramble to begin.";
   if (reviewedFaces) cubeFaces = cloneFaces(reviewedFaces);
+  stepRange.value = 0;
+  stepRange.max = 0;
   renderPlaybackControls();
+  syncCube3d();
 }
 
-function setReviewedFaces(faces, metaText) {
+function setReviewedFaces(faces, metaText, diagnostics = null, validation = null) {
   reviewedFaces = cloneFaces(faces);
   cubeFaces = cloneFaces(faces);
+  clearDetectionDiagnostics();
+  if (diagnostics) setDetectionDiagnostics(diagnostics);
+  validationReport = validation;
   clearSolution();
   reviewMeta.textContent = metaText;
   renderCube();
@@ -269,6 +361,12 @@ function detectionMeta(data) {
   if (data.image) parts.push(`${data.image.width}x${data.image.height}`);
   if (data.diagnostics) {
     parts.push(`confidence ${Math.round(data.diagnostics.lowestConfidence * 100)}%+`);
+    if (data.diagnostics.balancedStickers) {
+      parts.push(`${data.diagnostics.balancedStickers} balanced`);
+    }
+    if (data.diagnostics.lowConfidenceStickers) {
+      parts.push(`${data.diagnostics.lowConfidenceStickers} low confidence`);
+    }
   }
   if (data.warnings && data.warnings.length) parts.push(data.warnings.join(" "));
   return parts.join(" - ") || "Detected from image";
@@ -294,7 +392,7 @@ async function detectSelectedImage() {
     const response = await fetch("/api/detect-net", { method: "POST", body });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.error || "Detection failed");
-    setReviewedFaces(data.faces, detectionMeta(data));
+    setReviewedFaces(data.faces, detectionMeta(data), data.diagnostics, data.validation);
     updateUploadDiagnostics(data);
     scrambleBox.style.display = "none";
     setStatus("Detected");
@@ -331,9 +429,12 @@ solveButton.addEventListener("click", async () => {
   clearSolution();
   try {
     const data = await postJson("/api/solve", { faces: reviewedFaces });
+    validationReport = data.validation || null;
     renderSolution(data);
     setStatus("Solved");
   } catch (error) {
+    validationReport = { issues: [error.message] };
+    renderValidationSummary();
     setStatus(error.message, true);
   }
 });
@@ -345,6 +446,8 @@ function renderSolution(data) {
   solutionMoves = data.moves || [];
   solutionInstructions = data.instructions || [];
   moveCount.textContent = `${data.moveCount} moves`;
+  stepRange.max = Math.max(0, solutionStates.length - 1);
+  stepRange.value = 0;
   solutionMoves.forEach((move, index) => {
     const chip = document.createElement("button");
     chip.type = "button";
@@ -374,14 +477,43 @@ function goToStep(step) {
   if (!solutionStates.length) return;
   currentStep = Math.max(0, Math.min(step, solutionStates.length - 1));
   cubeFaces = cloneFaces(solutionStates[currentStep]);
+  if (currentStep === solutionStates.length - 1) stopPlayback();
   renderCube();
   renderPlaybackControls();
+}
+
+function togglePlayback() {
+  if (!solutionStates.length) return;
+  if (playTimer) {
+    stopPlayback();
+    renderPlaybackControls();
+    return;
+  }
+  if (currentStep === solutionStates.length - 1) goToStep(0);
+  playTimer = window.setInterval(() => {
+    if (currentStep >= solutionStates.length - 1) {
+      stopPlayback();
+      renderPlaybackControls();
+      return;
+    }
+    goToStep(currentStep + 1);
+  }, 850);
+  renderPlaybackControls();
+}
+
+function stopPlayback() {
+  if (!playTimer) return;
+  window.clearInterval(playTimer);
+  playTimer = null;
 }
 
 function renderPlaybackControls() {
   if (!solutionStates.length) {
     stepLabel.textContent = "Step 0";
     stepMove.textContent = "Starting state";
+    playSteps.disabled = true;
+    stepRange.value = 0;
+    stepRange.max = 0;
     return;
   }
 
@@ -399,6 +531,10 @@ function renderPlaybackControls() {
   document.getElementById("prevStep").disabled = currentStep === 0;
   document.getElementById("nextStep").disabled = currentStep === solutionStates.length - 1;
   document.getElementById("lastStep").disabled = currentStep === solutionStates.length - 1;
+  playSteps.disabled = solutionStates.length <= 1;
+  playSteps.textContent = playTimer ? "Pause" : "Play";
+  stepRange.max = solutionStates.length - 1;
+  stepRange.value = currentStep;
 
   document.querySelectorAll(".move-chip").forEach((chip, index) => {
     chip.classList.toggle("is-active", currentStep === index + 1);
@@ -423,6 +559,20 @@ document.getElementById("prevStep").addEventListener("click", () => goToStep(cur
 document.getElementById("nextStep").addEventListener("click", () => goToStep(currentStep + 1));
 document.getElementById("lastStep").addEventListener("click", () => {
   if (solutionStates.length) goToStep(solutionStates.length - 1);
+});
+playSteps.addEventListener("click", togglePlayback);
+stepRange.addEventListener("input", () => goToStep(Number(stepRange.value)));
+nextFlaggedButton.addEventListener("click", () => {
+  const flagged = flaggedStickers();
+  if (!flagged.length) return;
+  const currentIndex = flagged.findIndex(
+    (sticker) => stickerKey(sticker.face, sticker.index) === reviewTargetKey
+  );
+  const next = flagged[(currentIndex + 1) % flagged.length];
+  reviewTargetKey = stickerKey(next.face, next.index);
+  renderCube();
+  const target = cubeNet.querySelector(`[data-sticker-key="${reviewTargetKey}"]`);
+  target?.focus();
 });
 netImage.addEventListener("change", (event) => {
   const file = event.target.files[0];
@@ -505,10 +655,33 @@ function isTextInput(target) {
   );
 }
 
+function syncCube3d() {
+  if (window.Rubik3D?.setFaces) {
+    window.Rubik3D.setFaces(cubeFaces);
+  }
+}
+
+document.addEventListener("rubik3d-ready", syncCube3d);
+
 document.addEventListener("keydown", (event) => {
+  if (isTextInput(event.target)) return;
   if (!solutionStates.length) return;
-  if (event.key === "ArrowLeft") goToStep(currentStep - 1);
-  if (event.key === "ArrowRight") goToStep(currentStep + 1);
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    goToStep(currentStep - 1);
+  }
+  if (event.key === "ArrowRight") {
+    event.preventDefault();
+    goToStep(currentStep + 1);
+  }
+  if (event.key === "Home") {
+    event.preventDefault();
+    goToStep(0);
+  }
+  if (event.key === "End") {
+    event.preventDefault();
+    goToStep(solutionStates.length - 1);
+  }
 });
 
 initPalette();

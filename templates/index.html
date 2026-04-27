@@ -43,6 +43,7 @@
           <div class="palette" id="palette" aria-label="Sticker color palette"></div>
           <div class="counts" id="counts"></div>
           <div class="validation-box" id="validationBox">No cube loaded</div>
+          <button class="secondary-action" id="nextFlaggedButton" type="button" disabled>Review flagged sticker</button>
           <button class="solve-action" id="solveButton" type="button" disabled>Solve reviewed state</button>
         </div>
 
@@ -54,7 +55,12 @@
             </div>
             <span id="reviewMeta">No cube loaded</span>
           </div>
-          <div class="cube-net" id="cubeNet"></div>
+          <div class="cube-views">
+            <div class="cube-net" id="cubeNet"></div>
+            <div class="cube-3d" id="cube3d">
+              <canvas id="cube3dCanvas" aria-label="3D cube view"></canvas>
+            </div>
+          </div>
         </div>
 
         <div class="solution-panel">
@@ -65,18 +71,21 @@
           <div class="stepper" id="stepper" hidden>
             <button class="step-button" id="firstStep" type="button" aria-label="Go to start">|&lt;</button>
             <button class="step-button" id="prevStep" type="button" aria-label="Previous move">&lt;</button>
+            <button class="step-button" id="playSteps" type="button" aria-label="Play solution">Play</button>
             <div class="step-readout">
               <strong id="stepLabel">Step 0</strong>
               <span id="stepMove">Starting state</span>
             </div>
             <button class="step-button" id="nextStep" type="button" aria-label="Next move">&gt;</button>
             <button class="step-button" id="lastStep" type="button" aria-label="Go to final state">&gt;|</button>
+            <input class="step-range" id="stepRange" type="range" min="0" max="0" value="0" aria-label="Solution step">
           </div>
           <div class="moves" id="moves"></div>
           <ol class="instructions" id="instructions"></ol>
         </div>
       </section>
     </main>
+    <script type="module" src="{{ url_for('static', filename='js/cube3d.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   </body>
 </html>

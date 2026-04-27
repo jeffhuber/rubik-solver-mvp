@@ -38,9 +38,56 @@ def validate_faces_shape(faces: Faces) -> None:
 def sticker_counts(faces: Faces) -> Dict[str, int]:
     counts = {color: 0 for color in COLOR_ORDER}
     for face in FACE_ORDER:
-        for color in faces.get(face, []):
+        stickers = faces.get(face, []) if isinstance(faces, dict) else []
+        if not isinstance(stickers, list):
+            continue
+        for color in stickers:
             counts[color] = counts.get(color, 0) + 1
     return counts
+
+
+def validate_faces_report(faces: Faces) -> Dict:
+    issues = []
+    counts = sticker_counts(faces) if isinstance(faces, dict) else {color: 0 for color in COLOR_ORDER}
+    centers = {}
+
+    if not isinstance(faces, dict):
+        return {
+            "ok": False,
+            "counts": counts,
+            "centers": centers,
+            "issues": ["Cube state must be a faces object."],
+        }
+
+    missing = [face for face in FACE_ORDER if face not in faces]
+    if missing:
+        issues.append(f"Missing faces: {', '.join(missing)}")
+
+    for face in FACE_ORDER:
+        stickers = faces.get(face)
+        if not isinstance(stickers, list) or len(stickers) != 9:
+            issues.append(f"Face {face} must contain exactly 9 stickers.")
+            continue
+        unknown = sorted(set(stickers) - set(COLOR_ORDER))
+        if unknown:
+            issues.append(f"Face {face} contains unknown colors: {', '.join(unknown)}")
+        centers[face] = stickers[4]
+
+    bad_counts = {color: count for color, count in counts.items() if count != 9}
+    if bad_counts:
+        details = ", ".join(f"{color}={count}" for color, count in sorted(bad_counts.items()))
+        issues.append(f"Each color must appear exactly 9 times ({details}).")
+
+    center_values = [centers[face] for face in FACE_ORDER if face in centers]
+    if len(center_values) != 6 or len(set(center_values)) != 6:
+        issues.append("Center stickers must be six unique colors.")
+
+    return {
+        "ok": not issues,
+        "counts": counts,
+        "centers": centers,
+        "issues": issues,
+    }
 
 
 def faces_to_facelets(faces: Faces) -> str:

@@ -19,6 +19,8 @@ jobs:
       - name: Compile Python
         run: python -m compileall app.py rubik_solver tests
       - name: Check JavaScript
-        run: node --check static/js/main.js
+        run: |
+          node --check static/js/main.js
+          node --check static/js/cube3d.js
       - name: Run smoke test
         run: python tests/smoke_test.py

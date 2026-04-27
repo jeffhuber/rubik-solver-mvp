@@ -9,6 +9,8 @@ The app intentionally starts with structured cube-net images rather than arbitra
 
 Flattened net screenshots can be selected with the file picker, dragged onto the upload target, or pasted from the clipboard.
 
+After detection, the app shows sticker counts, center validation, low-confidence/auto-balanced sticker flags, manual click-to-paint correction, a move timeline, keyboard step-through controls, and a live Three.js cube view.
+
 ## Local Development
 
 ```bash
@@ -31,6 +33,7 @@ python -m rubik_solver.net_parser "/path/to/ruwix screenshot.jpg"
 ```bash
 python -m compileall app.py rubik_solver tests
 node --check static/js/main.js
+node --check static/js/cube3d.js
 python tests/smoke_test.py "/path/to/ruwix screenshot.jpg"
 ```
 

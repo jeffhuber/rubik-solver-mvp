@@ -9,6 +9,7 @@ from rubik_solver.cube import (
     random_scramble_state,
     solution_states,
     solve_faces,
+    validate_faces_report,
 )
 from rubik_solver.net_parser import NetParseError, parse_image_bytes
 
@@ -38,6 +39,7 @@ def detect_net():
     except NetParseError as exc:
         return _error(str(exc), 422)
 
+    result["validation"] = validate_faces_report(result["faces"])
     return jsonify(result)
 
 
@@ -59,8 +61,15 @@ def solve():
             "instructions": [move_to_instruction(move) for move in moves],
             "moveCount": len(moves),
             "states": solution_states(faces, moves),
+            "validation": validate_faces_report(faces),
         }
     )
+
+
+@app.post("/api/validate")
+def validate():
+    payload = request.get_json(silent=True) or {}
+    return jsonify(validate_faces_report(payload.get("faces")))
 
 
 @app.post("/api/random")

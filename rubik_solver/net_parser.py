@@ -1,12 +1,13 @@
 import argparse
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import cv2
 import numpy as np
 
-from .constants import COLOR_RGB, DISPLAY_FACE_ORDER, FACE_NET_POSITIONS
+from .constants import COLOR_ORDER, COLOR_RGB, DISPLAY_FACE_ORDER, FACE_NET_POSITIONS
 from .cube import CubeStateError, faces_to_facelets, solve_faces
 
 
@@ -18,6 +19,8 @@ class StickerSample:
     rgb: Tuple[int, int, int]
     color: str
     confidence: float
+    nearest_color: str
+    balanced: bool = False
 
 
 class NetParseError(ValueError):
@@ -54,17 +57,24 @@ def parse_bgr_image(image: np.ndarray) -> Dict:
 
     warnings = []
     confidence_values = [sample.confidence for sample in samples]
-    low_confidence = [sample for sample in samples if sample.confidence < 0.18]
+    low_confidence = [sample for sample in samples if sample.confidence < 0.22]
+    balanced = [sample for sample in samples if sample.balanced]
     if low_confidence:
         warnings.append(
             f"{len(low_confidence)} stickers had low color confidence; review them before solving."
         )
+    if balanced:
+        warnings.append(
+            f"{len(balanced)} stickers were color-balanced to keep exactly 9 of each color."
+        )
 
     try:
         facelets = faces_to_facelets(faces)
+        validation_error = None
     except CubeStateError as exc:
         facelets = None
-        warnings.append(str(exc))
+        validation_error = str(exc)
+        warnings.append(validation_error)
 
     return {
         "faces": faces,
@@ -78,6 +88,23 @@ def parse_bgr_image(image: np.ndarray) -> Dict:
         "diagnostics": {
             "lowestConfidence": round(min(confidence_values), 3),
             "lowConfidenceStickers": len(low_confidence),
+            "balancedStickers": len(balanced),
+            "classificationMode": "balanced-exact-count" if balanced else "nearest-reference",
+            "validationError": validation_error,
+            "stickers": [
+                {
+                    "face": sample.face,
+                    "index": sample.row * 3 + sample.col,
+                    "row": sample.row,
+                    "col": sample.col,
+                    "color": sample.color,
+                    "nearestColor": sample.nearest_color,
+                    "confidence": sample.confidence,
+                    "balanced": sample.balanced,
+                    "lowConfidence": sample.confidence < 0.22,
+                }
+                for sample in samples
+            ],
         },
         "grid": {
             "xLines": [round(float(value), 2) for value in x_lines],
@@ -88,26 +115,35 @@ def parse_bgr_image(image: np.ndarray) -> Dict:
 
 
 def detect_grid_lines(image: np.ndarray) -> Tuple[List[float], List[float]]:
-    black_mask = cv2.inRange(image, np.array([0, 0, 0]), np.array([75, 75, 75]))
-    height, width = black_mask.shape
+    base_mask = cv2.inRange(image, np.array([0, 0, 0]), np.array([75, 75, 75]))
+    relaxed_mask = cv2.inRange(image, np.array([0, 0, 0]), np.array([90, 90, 90]))
+    kernel = np.ones((3, 3), np.uint8)
+    masks = [
+        base_mask,
+        relaxed_mask,
+        cv2.morphologyEx(relaxed_mask, cv2.MORPH_CLOSE, kernel),
+    ]
+    height, width = base_mask.shape
 
-    x_candidates = _axis_line_centers(black_mask, axis=0, min_coverage=max(70, height * 0.08))
-    y_candidates = _axis_line_centers(black_mask, axis=1, min_coverage=max(70, width * 0.08))
-
-    x_lines = _best_even_sequence(x_candidates, expected_count=13, image_span=width)
-    y_lines = _best_even_sequence(y_candidates, expected_count=10, image_span=height)
-
-    if x_lines is None or y_lines is None:
-        raise NetParseError(
-            "Could not detect a 12x9 flattened cube net. Try a cleaner Ruwix-style screenshot."
+    for black_mask in masks:
+        x_candidates = _axis_line_centers(
+            black_mask, axis=0, min_coverage=max(70, height * 0.08)
+        )
+        y_candidates = _axis_line_centers(
+            black_mask, axis=1, min_coverage=max(70, width * 0.08)
         )
 
-    if not _looks_like_cube_net(black_mask, x_lines, y_lines):
-        raise NetParseError(
-            "Detected grid lines did not match the expected Ruwix-style cube net layout."
-        )
+        x_lines = _best_even_sequence(x_candidates, expected_count=13, image_span=width)
+        y_lines = _best_even_sequence(y_candidates, expected_count=10, image_span=height)
 
-    return x_lines, y_lines
+        if x_lines is None or y_lines is None:
+            continue
+        if _looks_like_cube_net(black_mask, x_lines, y_lines):
+            return x_lines, y_lines
+
+    raise NetParseError(
+        "Could not detect a 12x9 flattened cube net. Try a cleaner Ruwix-style screenshot."
+    )
 
 
 def _axis_line_centers(mask: np.ndarray, axis: int, min_coverage: float) -> List[float]:
@@ -115,10 +151,11 @@ def _axis_line_centers(mask: np.ndarray, axis: int, min_coverage: float) -> List
     indices = np.flatnonzero(counts >= min_coverage)
     groups = _group_consecutive(indices)
     centers = []
+    max_line_width = max(12, mask.shape[1 - axis] * 0.035)
     for group in groups:
         start, end = int(group[0]), int(group[-1])
         width = end - start + 1
-        if width > 30:
+        if width > max_line_width:
             continue
         centers.append((start + end) / 2)
     return centers
@@ -193,7 +230,10 @@ def _looks_like_cube_net(mask: np.ndarray, x_lines: Sequence[float], y_lines: Se
         x0, x1 = int(x_lines[gx]), int(x_lines[gx + 3])
         y0, y1 = int(y_lines[gy]), int(y_lines[gy + 3])
         region = mask[max(0, y0 - 3) : y1 + 3, max(0, x0 - 3) : x1 + 3]
-        if region.size == 0 or np.count_nonzero(region) < 600:
+        if region.size == 0:
+            return False
+        min_dark_pixels = max(120, region.size * 0.01)
+        if np.count_nonzero(region) < min_dark_pixels:
             return False
     return True
 
@@ -212,7 +252,8 @@ def sample_stickers(
                 y1 = y_lines[grid_y + row + 1]
                 rgb = _median_center_rgb(rgb_image, x0, y0, x1, y1)
                 color, confidence = classify_rgb(rgb)
-                samples.append(StickerSample(face, row, col, rgb, color, confidence))
+                samples.append(StickerSample(face, row, col, rgb, color, confidence, color))
+    _balance_samples_to_exact_counts(samples)
     return samples
 
 
@@ -245,6 +286,72 @@ def classify_rgb(rgb: Tuple[int, int, int]) -> Tuple[str, float]:
     second_distance = distances[1][1]
     confidence = max(0.0, min(1.0, (second_distance - best_distance) / max(second_distance, 1.0)))
     return best_color, round(confidence, 3)
+
+
+def _balance_samples_to_exact_counts(samples: List[StickerSample]) -> None:
+    counts = {color: 0 for color in COLOR_ORDER}
+    for sample in samples:
+        counts[sample.color] += 1
+    if all(count == 9 for count in counts.values()):
+        return
+
+    assignments = _exact_color_assignments([sample.rgb for sample in samples])
+    for sample, color in zip(samples, assignments):
+        if sample.color != color:
+            sample.balanced = True
+            sample.color = color
+            sample.confidence = min(sample.confidence, 0.19)
+
+
+def _exact_color_assignments(samples: Sequence[Tuple[int, int, int]]) -> List[str]:
+    distances = []
+    for rgb in samples:
+        vector = np.array(rgb, dtype=np.float32)
+        distances.append(
+            [
+                float(np.linalg.norm(vector - np.array(COLOR_RGB[color], dtype=np.float32)))
+                for color in COLOR_ORDER
+            ]
+        )
+
+    @lru_cache(maxsize=None)
+    def best_cost(index: int, counts: Tuple[int, ...]) -> float:
+        if index == len(samples):
+            return 0.0 if all(count == 9 for count in counts) else float("inf")
+
+        best = float("inf")
+        for color_index, distance in enumerate(distances[index]):
+            if counts[color_index] >= 9:
+                continue
+            next_counts = list(counts)
+            next_counts[color_index] += 1
+            best = min(best, distance + best_cost(index + 1, tuple(next_counts)))
+        return best
+
+    counts = (0, 0, 0, 0, 0, 0)
+    if best_cost(0, counts) == float("inf"):
+        return [classify_rgb(rgb)[0] for rgb in samples]
+
+    path = []
+    for index in range(len(samples)):
+        best_color = None
+        best = float("inf")
+        for color_index, distance in enumerate(distances[index]):
+            if counts[color_index] >= 9:
+                continue
+            next_counts = list(counts)
+            next_counts[color_index] += 1
+            total = distance + best_cost(index + 1, tuple(next_counts))
+            if total < best:
+                best = total
+                best_color = color_index
+        if best_color is None:
+            return [classify_rgb(rgb)[0] for rgb in samples]
+        path.append(COLOR_ORDER[best_color])
+        next_counts = list(counts)
+        next_counts[best_color] += 1
+        counts = tuple(next_counts)
+    return path
 
 
 def main() -> None:

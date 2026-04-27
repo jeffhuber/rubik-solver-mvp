@@ -2,12 +2,15 @@ import json
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from rubik_solver.constants import FACE_ORDER
+from rubik_solver.constants import COLOR_RGB, FACE_NET_POSITIONS, FACE_ORDER
 from rubik_solver.cube import random_scramble_state, solve_faces, solution_states
-from rubik_solver.net_parser import parse_image_file
+from rubik_solver.net_parser import parse_bgr_image, parse_image_file
 
 
 def main() -> int:
@@ -16,6 +19,14 @@ def main() -> int:
     assert_is_solved(solution_states(faces, solution)[-1])
     print("Scramble:", " ".join(scramble))
     print("Solution:", " ".join(solution), f"({len(solution)} moves)")
+
+    print("\nGenerated Ruwix-net parser smoke test")
+    parsed = parse_bgr_image(render_synthetic_ruwix_net(faces))
+    if parsed["faces"] != faces:
+        raise AssertionError("Synthetic net parser did not recover the rendered cube state.")
+    assert_is_solved(solution_states(parsed["faces"], solve_faces(parsed["faces"]))[-1])
+    print("Grid:", json.dumps(parsed["grid"]))
+    print("Warnings:", parsed["warnings"])
 
     for path in sys.argv[1:]:
         print(f"\nImage parser smoke test: {path}")
@@ -33,6 +44,39 @@ def assert_is_solved(faces):
         center = faces[face][4]
         if faces[face] != [center] * 9:
             raise AssertionError(f"Playback did not solve face {face}: {faces[face]}")
+
+
+def render_synthetic_ruwix_net(faces):
+    cell = 48
+    border = 2
+    pad_x = 32
+    pad_y = 28
+    width = pad_x * 2 + cell * 12 + 150
+    height = pad_y * 2 + cell * 9
+    image = np.full((height, width, 3), 245, dtype=np.uint8)
+
+    for face, (grid_x, grid_y) in FACE_NET_POSITIONS.items():
+        for row in range(3):
+            for col in range(3):
+                index = row * 3 + col
+                x0 = pad_x + (grid_x + col) * cell
+                y0 = pad_y + (grid_y + row) * cell
+                x1 = x0 + cell
+                y1 = y0 + cell
+                rgb = COLOR_RGB[faces[face][index]]
+                bgr = (rgb[2], rgb[1], rgb[0])
+                cv2.rectangle(image, (x0, y0), (x1, y1), (8, 8, 8), thickness=-1)
+                cv2.rectangle(
+                    image,
+                    (x0 + border, y0 + border),
+                    (x1 - border, y1 - border),
+                    bgr,
+                    thickness=-1,
+                )
+
+    cv2.rectangle(image, (width - 118, 18), (width - 20, 58), (222, 235, 250), thickness=-1)
+    cv2.putText(image, "Scan", (width - 96, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
+    return image
 
 
 if __name__ == "__main__":
