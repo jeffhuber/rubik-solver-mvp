@@ -497,6 +497,93 @@ h2 {
   padding: 10px;
 }
 
+.sticker-review {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.sticker-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.sticker-review-header strong,
+.sticker-review-header span,
+.sticker-review-details span {
+  display: block;
+}
+
+.sticker-review-header span,
+.sticker-review-count,
+.sticker-review-details {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.sticker-review-body {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.review-swatch {
+  width: 56px;
+  aspect-ratio: 1;
+  border: 2px solid var(--sticker-border);
+  border-radius: 8px;
+}
+
+.review-colors {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.review-color-button {
+  aspect-ratio: 1;
+  border: 2px solid var(--palette-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.review-color-button.is-active {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.review-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.review-button {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 7px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.review-button:disabled {
+  color: var(--disabled-ink);
+  cursor: not-allowed;
+}
+
 .parser-debug-header {
   display: flex;
   align-items: center;
@@ -785,6 +872,32 @@ h2 {
   cursor: not-allowed;
 }
 
+.share-feedback {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.share-feedback span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.share-feedback input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px;
+  font-size: 13px;
+}
+
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: 300px minmax(420px, 1fr);
@@ -847,6 +960,10 @@ h2 {
   }
 
   .solution-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .review-actions {
     grid-template-columns: 1fr;
   }
 

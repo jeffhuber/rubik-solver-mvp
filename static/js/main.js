@@ -27,6 +27,7 @@ let solutionMoves = [];
 let solutionInstructions = [];
 let currentScramble = [];
 let activeSolveMetadata = null;
+let latestDetectionResult = null;
 let currentStep = 0;
 let detectionDiagnostics = null;
 let validationReport = null;
@@ -53,6 +54,7 @@ const stepLabel = document.getElementById("stepLabel");
 const stepMove = document.getElementById("stepMove");
 const detectButton = document.getElementById("detectButton");
 const debugOverlayButton = document.getElementById("debugOverlayButton");
+const downloadFixtureButton = document.getElementById("downloadFixtureButton");
 const fileDrop = document.getElementById("fileDrop");
 const fileLabel = document.getElementById("fileLabel");
 const netImage = document.getElementById("netImage");
@@ -66,10 +68,23 @@ const qualityHint = document.getElementById("qualityHint");
 const parserDebug = document.getElementById("parserDebug");
 const parserDebugImage = document.getElementById("parserDebugImage");
 const parserDebugMeta = document.getElementById("parserDebugMeta");
+const stickerReview = document.getElementById("stickerReview");
+const stickerReviewTitle = document.getElementById("stickerReviewTitle");
+const stickerReviewSubtitle = document.getElementById("stickerReviewSubtitle");
+const stickerReviewCount = document.getElementById("stickerReviewCount");
+const stickerReviewSwatch = document.getElementById("stickerReviewSwatch");
+const stickerReviewDetails = document.getElementById("stickerReviewDetails");
+const reviewColors = document.getElementById("reviewColors");
+const prevFlaggedButton = document.getElementById("prevFlaggedButton");
+const markReviewedButton = document.getElementById("markReviewedButton");
+const nextFlaggedInlineButton = document.getElementById("nextFlaggedInlineButton");
 const solutionActions = document.getElementById("solutionActions");
 const copySolutionButton = document.getElementById("copySolutionButton");
 const shareSolutionButton = document.getElementById("shareSolutionButton");
 const downloadCaseButton = document.getElementById("downloadCaseButton");
+const shareFeedback = document.getElementById("shareFeedback");
+const shareFeedbackText = document.getElementById("shareFeedbackText");
+const shareUrlInput = document.getElementById("shareUrlInput");
 const playbackSpeed = document.getElementById("playbackSpeed");
 
 function cloneFaces(faces) {
@@ -111,6 +126,15 @@ function stickerKey(face, index) {
   return `${face}-${index}`;
 }
 
+function stickerFromKey(key) {
+  const [face, indexText] = (key || "").split("-");
+  const index = Number(indexText);
+  if (!FACE_ORDER.includes(face) || !Number.isInteger(index) || index < 0 || index > 8) {
+    return null;
+  }
+  return { face, index };
+}
+
 function colorLabel(color) {
   return color ? color.charAt(0).toUpperCase() + color.slice(1) : "Unknown";
 }
@@ -134,17 +158,21 @@ function setDetectionDiagnostics(diagnostics) {
     stickers,
     stickersByKey: new Map(stickers.map((sticker) => [stickerKey(sticker.face, sticker.index), sticker])),
   };
-  reviewTargetKey = null;
   manualCorrections = new Set();
+  const flagged = flaggedStickers();
+  reviewTargetKey = flagged[0] ? stickerKey(flagged[0].face, flagged[0].index) : null;
 }
 
 function clearDetectionDiagnostics() {
   detectionDiagnostics = null;
+  latestDetectionResult = null;
   validationReport = null;
   manualCorrections = new Set();
   reviewTargetKey = null;
   clearParserDebug();
+  renderStickerReview();
   renderFlaggedControl();
+  updateFixtureControl();
 }
 
 function formatBytes(bytes) {
@@ -171,6 +199,8 @@ function validateImageFile(file) {
 function setSelectedNetFile(file, sourceLabel) {
   validateImageFile(file);
   selectedNetFile = file;
+  latestDetectionResult = null;
+  updateFixtureControl();
   clearShareHash();
   clearParserDebug();
   const name = file.name || "clipboard image";
@@ -224,6 +254,8 @@ function renderCube() {
     cubeNet.innerHTML = "";
     solveButton.disabled = true;
     renderCounts();
+    renderStickerReview();
+    updateFixtureControl();
     syncCube3d();
     return;
   }
@@ -248,18 +280,7 @@ function renderCube() {
       sticker.setAttribute("aria-label", stickerAriaLabel(face, index, color, diagnostics));
       sticker.disabled = !canEditStickers();
       sticker.addEventListener("click", () => {
-        if (!canEditStickers()) return;
-        if (solutionStates.length) clearSolution();
-        if (!reviewedFaces) reviewedFaces = cloneFaces(cubeFaces);
-        reviewedFaces[face][index] = selectedColor;
-        cubeFaces[face][index] = selectedColor;
-        currentScramble = [];
-        renderScrambleBox();
-        clearShareHash();
-        manualCorrections.add(key);
-        if (reviewTargetKey === key) reviewTargetKey = null;
-        validationReport = null;
-        renderCube();
+        applyStickerColor(face, index, selectedColor, { advance: reviewTargetKey === key });
       });
       faceEl.appendChild(sticker);
     });
@@ -298,6 +319,37 @@ function stickerAriaLabel(face, index, color, diagnostics) {
     parts.push("select to repaint with the chosen color");
   }
   return parts.join(", ");
+}
+
+function applyStickerColor(face, index, color, options = {}) {
+  if (!canEditStickers()) return;
+  const key = stickerKey(face, index);
+  if (solutionStates.length) clearSolution();
+  if (!reviewedFaces) reviewedFaces = cloneFaces(cubeFaces);
+  reviewedFaces[face][index] = color;
+  cubeFaces[face][index] = color;
+  currentScramble = [];
+  renderScrambleBox();
+  clearShareHash();
+  clearShareFeedback();
+  manualCorrections.add(key);
+  validationReport = null;
+  if (options.advance) {
+    selectFlaggedTarget(1);
+  }
+  renderCube();
+  focusReviewTarget();
+}
+
+function markReviewTarget(options = {}) {
+  const target = stickerFromKey(reviewTargetKey);
+  if (!target || !canEditStickers()) return;
+  manualCorrections.add(reviewTargetKey);
+  if (options.advance) {
+    selectFlaggedTarget(1);
+  }
+  renderCube();
+  focusReviewTarget();
 }
 
 function canEditStickers() {
@@ -398,10 +450,108 @@ function renderValidationSummary() {
 
 function renderFlaggedControl() {
   const flagged = flaggedStickers();
+  const targetExists = reviewTargetKey && detectionDiagnostics?.stickersByKey?.has(reviewTargetKey);
+  if (!targetExists) {
+    reviewTargetKey = flagged[0] ? stickerKey(flagged[0].face, flagged[0].index) : null;
+  }
   nextFlaggedButton.disabled = !flagged.length || !canEditStickers();
   nextFlaggedButton.textContent = flagged.length
     ? `Review flagged sticker (${flagged.length})`
     : "Review flagged sticker";
+  renderStickerReview(flagged);
+  updateFixtureControl();
+}
+
+function renderStickerReview(flagged = flaggedStickers()) {
+  if (!detectionDiagnostics || !cubeFaces || !canEditStickers()) {
+    stickerReview.hidden = true;
+    return;
+  }
+
+  if (!reviewTargetKey && flagged.length) {
+    reviewTargetKey = stickerKey(flagged[0].face, flagged[0].index);
+  }
+
+  const target = stickerFromKey(reviewTargetKey);
+  if (!target) {
+    stickerReview.hidden = true;
+    return;
+  }
+
+  const diagnostics = stickerDiagnostics(target.face, target.index);
+  const currentColor = cubeFaces[target.face][target.index];
+  const isFlagged = flagged.some(
+    (sticker) => stickerKey(sticker.face, sticker.index) === reviewTargetKey
+  );
+
+  stickerReview.hidden = false;
+  stickerReviewTitle.textContent = `${target.face}${target.index + 1}: ${colorLabel(currentColor)}`;
+  stickerReviewSubtitle.textContent = isFlagged
+    ? "Flagged for review"
+    : "Reviewed or manually corrected";
+  stickerReviewCount.textContent = flagged.length ? `${flagged.length} flagged` : "All reviewed";
+  stickerReviewSwatch.className = `review-swatch color-${currentColor}`;
+
+  stickerReviewDetails.innerHTML = "";
+  [
+    diagnostics ? `Detected: ${colorLabel(diagnostics.color)}` : "Detected: unavailable",
+    diagnostics ? `Nearest: ${colorLabel(diagnostics.nearestColor)}` : null,
+    diagnostics?.confidence !== undefined
+      ? `Confidence: ${Math.round(diagnostics.confidence * 100)}%`
+      : null,
+    diagnostics?.rgb ? `RGB: ${diagnostics.rgb.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .forEach((line) => {
+      const item = document.createElement("span");
+      item.textContent = line;
+      stickerReviewDetails.appendChild(item);
+    });
+
+  reviewColors.innerHTML = "";
+  COLORS.forEach((color) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `review-color-button color-${color}`;
+    button.classList.toggle("is-active", color === currentColor);
+    button.setAttribute("aria-label", `Set ${target.face}${target.index + 1} to ${colorLabel(color)}`);
+    button.setAttribute("aria-pressed", String(color === currentColor));
+    button.addEventListener("click", () => {
+      applyStickerColor(target.face, target.index, color, { advance: true });
+    });
+    reviewColors.appendChild(button);
+  });
+
+  prevFlaggedButton.disabled = flagged.length < 2;
+  nextFlaggedInlineButton.disabled = flagged.length < 2;
+  markReviewedButton.disabled = !isFlagged;
+}
+
+function selectFlaggedTarget(direction = 1) {
+  const flagged = flaggedStickers();
+  if (!flagged.length) {
+    reviewTargetKey = null;
+    return null;
+  }
+
+  const currentIndex = flagged.findIndex(
+    (sticker) => stickerKey(sticker.face, sticker.index) === reviewTargetKey
+  );
+  const nextIndex =
+    currentIndex === -1
+      ? direction >= 0
+        ? 0
+        : flagged.length - 1
+      : (currentIndex + direction + flagged.length) % flagged.length;
+  const next = flagged[nextIndex];
+  reviewTargetKey = stickerKey(next.face, next.index);
+  return next;
+}
+
+function focusReviewTarget() {
+  if (!reviewTargetKey) return;
+  const target = cubeNet.querySelector(`[data-sticker-key="${reviewTargetKey}"]`);
+  target?.focus();
 }
 
 function clearSolution() {
@@ -417,6 +567,7 @@ function clearSolution() {
   moveCount.textContent = "";
   solveMeta.textContent = "";
   solveMeta.className = "solve-meta";
+  clearShareFeedback();
   stepContext.textContent = reviewedFaces
     ? "Review and correct the starting state before solving."
     : "Load a cube net or random scramble to begin.";
@@ -449,6 +600,58 @@ function renderScrambleBox() {
   }
   scrambleBox.style.display = "block";
   scrambleBox.textContent = currentScramble.join(" ");
+}
+
+function updateFixtureControl() {
+  downloadFixtureButton.disabled = !latestDetectionResult || !selectedNetFile || !reviewedFaces;
+}
+
+async function downloadParserFixture() {
+  if (!latestDetectionResult || !selectedNetFile || !reviewedFaces) return;
+  try {
+    const imageDataUrl = await fileToDataUrl(selectedNetFile);
+    const fixture = {
+      schemaVersion: 1,
+      capturedAt: new Date().toISOString(),
+      source: {
+        fileName: selectedNetFile.name || "clipboard-image",
+        mimeType: selectedNetFile.type || "application/octet-stream",
+        size: selectedNetFile.size,
+      },
+      imageDataUrl,
+      expectedFaces: reviewedFaces,
+      detectedFaces: latestDetectionResult.faces,
+      corrections: Array.from(manualCorrections).map((key) => {
+        const target = stickerFromKey(key);
+        const diagnostics = target ? stickerDiagnostics(target.face, target.index) : null;
+        return {
+          key,
+          face: target?.face,
+          index: target?.index,
+          expectedColor: target ? reviewedFaces[target.face][target.index] : null,
+          detectedColor: diagnostics?.color || null,
+          nearestColor: diagnostics?.nearestColor || null,
+          confidence: diagnostics?.confidence ?? null,
+        };
+      }),
+      parser: {
+        image: latestDetectionResult.image,
+        facelets: latestDetectionResult.facelets,
+        grid: latestDetectionResult.grid,
+        warnings: latestDetectionResult.warnings || [],
+        diagnostics: latestDetectionResult.diagnostics,
+        debug: latestDetectionResult.debug,
+      },
+    };
+    downloadBlob(
+      JSON.stringify(fixture, null, 2),
+      `rubik-parser-fixture-${timestampSlug()}.json`,
+      "application/json;charset=utf-8"
+    );
+    setStatus("Parser fixture downloaded");
+  } catch (error) {
+    setStatus("Fixture download failed", true);
+  }
 }
 
 async function postJson(url, payload) {
@@ -512,8 +715,10 @@ async function detectSelectedImage() {
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.error || "Detection failed");
     setReviewedFaces(data.faces, detectionMeta(data), data.diagnostics, data.validation);
+    latestDetectionResult = data;
     setParserDebug(data.debug);
     updateUploadDiagnostics(data);
+    updateFixtureControl();
     setStatus("Detected");
   } catch (error) {
     setStatus(error.message, true);
@@ -525,6 +730,7 @@ async function detectSelectedImage() {
 }
 
 detectButton.addEventListener("click", detectSelectedImage);
+downloadFixtureButton.addEventListener("click", downloadParserFixture);
 debugOverlayButton.addEventListener("click", () => {
   parserDebug.hidden = !parserDebug.hidden;
   debugOverlayButton.textContent = parserDebug.hidden ? "Show parser overlay" : "Hide parser overlay";
@@ -799,11 +1005,26 @@ function updateSolutionActions() {
   downloadCaseButton.textContent = currentScramble.length ? "Download scramble" : "Download solution";
 }
 
+function setShareFeedback(message, url = "") {
+  shareFeedback.hidden = false;
+  shareFeedbackText.textContent = message;
+  shareUrlInput.value = url;
+  shareUrlInput.hidden = !url;
+}
+
+function clearShareFeedback() {
+  shareFeedback.hidden = true;
+  shareFeedbackText.textContent = "";
+  shareUrlInput.value = "";
+  shareUrlInput.hidden = true;
+}
+
 async function copySolution() {
   if (!hasShareableSolution()) return;
   try {
     await writeClipboard(solutionText());
     setStatus("Solution copied");
+    setShareFeedback("Solution copied to the clipboard.", createShareUrl());
   } catch (error) {
     setStatus("Copy failed", true);
   }
@@ -822,37 +1043,40 @@ async function shareSolutionLink() {
       await navigator.share({ title, text, url });
       window.history.replaceState(null, "", url);
       setStatus("Share sheet opened");
+      setShareFeedback("Share link ready.", url);
       return;
     }
     await writeClipboard(url);
     window.history.replaceState(null, "", url);
     setStatus("Share link copied");
+    setShareFeedback("Share link copied to the clipboard.", url);
   } catch (error) {
     if (error.name === "AbortError") return;
     try {
       await writeClipboard(url);
       window.history.replaceState(null, "", url);
       setStatus("Share link copied");
+      setShareFeedback("Share link copied to the clipboard.", url);
     } catch (_copyError) {
       setStatus("Share failed", true);
+      window.history.replaceState(null, "", url);
+      setShareFeedback("Clipboard blocked. Select the link below to copy it.", url);
     }
   }
 }
 
 function downloadCase() {
   if (!hasShareableSolution()) return;
-  const blob = new Blob([solutionText({ includeShareLink: true, includeState: true })], {
-    type: "text/plain;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${currentScramble.length ? "rubik-scramble" : "rubik-solution"}-${timestampSlug()}.txt`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(
+    solutionText({ includeShareLink: true, includeState: true }),
+    `${currentScramble.length ? "rubik-scramble" : "rubik-solution"}-${timestampSlug()}.txt`,
+    "text/plain;charset=utf-8"
+  );
   setStatus(currentScramble.length ? "Scramble downloaded" : "Solution downloaded");
+  setShareFeedback(
+    currentScramble.length ? "Scramble file downloaded." : "Solution file downloaded.",
+    createShareUrl()
+  );
 }
 
 function solutionText(options = {}) {
@@ -1001,6 +1225,27 @@ async function writeClipboard(text) {
   if (!copied) throw new Error("Clipboard unavailable");
 }
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(reader.error || new Error("File read failed")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function timestampSlug() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -1069,22 +1314,27 @@ playSteps.addEventListener("click", togglePlayback);
 copySolutionButton.addEventListener("click", copySolution);
 shareSolutionButton.addEventListener("click", shareSolutionLink);
 downloadCaseButton.addEventListener("click", downloadCase);
+shareUrlInput.addEventListener("focus", () => shareUrlInput.select());
 stepRange.addEventListener("input", () => {
   stopPlayback();
   goToStep(Number(stepRange.value), { animate: false });
 });
 nextFlaggedButton.addEventListener("click", () => {
-  const flagged = flaggedStickers();
-  if (!flagged.length) return;
-  const currentIndex = flagged.findIndex(
-    (sticker) => stickerKey(sticker.face, sticker.index) === reviewTargetKey
-  );
-  const next = flagged[(currentIndex + 1) % flagged.length];
-  reviewTargetKey = stickerKey(next.face, next.index);
+  selectFlaggedTarget(1);
   renderCube();
-  const target = cubeNet.querySelector(`[data-sticker-key="${reviewTargetKey}"]`);
-  target?.focus();
+  focusReviewTarget();
 });
+prevFlaggedButton.addEventListener("click", () => {
+  selectFlaggedTarget(-1);
+  renderCube();
+  focusReviewTarget();
+});
+nextFlaggedInlineButton.addEventListener("click", () => {
+  selectFlaggedTarget(1);
+  renderCube();
+  focusReviewTarget();
+});
+markReviewedButton.addEventListener("click", () => markReviewTarget({ advance: true }));
 netImage.addEventListener("change", (event) => {
   const file = event.target.files[0];
   if (file) {

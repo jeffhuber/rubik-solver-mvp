@@ -1,3 +1,4 @@
+import base64
 import json
 import sys
 from pathlib import Path
@@ -45,6 +46,8 @@ def main() -> int:
         raise AssertionError("Parser debug overlay was not returned as a PNG data URL.")
     print("Detection source:", margin_parsed["debug"]["detectionSource"])
 
+    run_parser_fixture_tests()
+
     print("\nSolver quality smoke test")
     tight_faces = facelets_to_color_faces(apply_moves(solved_facelets(), ["R", "U", "F2", "L'"]))
     tight_result = solve_faces_with_quality(tight_faces, "god20")
@@ -79,6 +82,35 @@ def main() -> int:
         assert_is_solved(solution_states(parsed["faces"], moves)[-1])
         print("Solution:", " ".join(moves), f"({len(moves)} moves)")
     return 0
+
+
+def run_parser_fixture_tests():
+    fixture_dir = ROOT / "tests" / "fixtures" / "parser"
+    fixtures = sorted(fixture_dir.glob("*.json"))
+    if not fixtures:
+        return
+
+    print("\nCaptured parser fixture tests")
+    for path in fixtures:
+        fixture = json.loads(path.read_text())
+        image = image_from_data_url(fixture["imageDataUrl"])
+        parsed = parse_bgr_image(image)
+        expected = fixture["expectedFaces"]
+        if parsed["faces"] != expected:
+            raise AssertionError(f"Parser fixture mismatch: {path}")
+        print(path.name, "ok")
+
+
+def image_from_data_url(data_url):
+    try:
+        _header, payload = data_url.split(",", 1)
+    except ValueError as exc:
+        raise AssertionError("Fixture imageDataUrl must be a data URL.") from exc
+    data = np.frombuffer(base64.b64decode(payload), dtype=np.uint8)
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if image is None:
+        raise AssertionError("Fixture imageDataUrl could not be decoded.")
+    return image
 
 
 def assert_is_solved(faces):

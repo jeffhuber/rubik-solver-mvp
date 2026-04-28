@@ -31,6 +31,7 @@
             </label>
             <button class="primary-action" id="detectButton" type="button">Detect stickers</button>
             <button class="secondary-action" id="debugOverlayButton" type="button" disabled>Show parser overlay</button>
+            <button class="secondary-action" id="downloadFixtureButton" type="button" disabled>Download parser fixture</button>
             <p class="hint">The parser expects the 12 by 9 unfolded cube net layout.</p>
           </div>
 
@@ -80,6 +81,25 @@
               <canvas id="cube3dCanvas" aria-label="3D cube view"></canvas>
             </div>
           </div>
+          <div class="sticker-review" id="stickerReview" hidden>
+            <div class="sticker-review-header">
+              <div>
+                <strong id="stickerReviewTitle">Sticker Review</strong>
+                <span id="stickerReviewSubtitle"></span>
+              </div>
+              <span id="stickerReviewCount"></span>
+            </div>
+            <div class="sticker-review-body">
+              <div class="review-swatch" id="stickerReviewSwatch" aria-hidden="true"></div>
+              <div class="sticker-review-details" id="stickerReviewDetails"></div>
+            </div>
+            <div class="review-colors" id="reviewColors" aria-label="Set reviewed sticker color"></div>
+            <div class="review-actions">
+              <button class="review-button" id="prevFlaggedButton" type="button">Previous</button>
+              <button class="review-button" id="markReviewedButton" type="button">Mark reviewed</button>
+              <button class="review-button" id="nextFlaggedInlineButton" type="button">Next</button>
+            </div>
+          </div>
           <div class="parser-debug" id="parserDebug" hidden>
             <div class="parser-debug-header">
               <strong>Parser Overlay</strong>
@@ -120,6 +140,10 @@
             <button class="solution-action-button" id="copySolutionButton" type="button" disabled>Copy solution</button>
             <button class="solution-action-button" id="shareSolutionButton" type="button" disabled>Share link</button>
             <button class="solution-action-button" id="downloadCaseButton" type="button" disabled>Download solution</button>
+          </div>
+          <div class="share-feedback" id="shareFeedback" hidden>
+            <span id="shareFeedbackText"></span>
+            <input id="shareUrlInput" type="text" readonly aria-label="Share link">
           </div>
           <div class="moves" id="moves"></div>
           <div class="solve-meta" id="solveMeta"></div>
