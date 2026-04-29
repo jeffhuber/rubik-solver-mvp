@@ -17,6 +17,23 @@ const PLAYBACK_SPEEDS = {
 const DEFAULT_PLAYBACK_SPEED = "1";
 const PLAYBACK_SPEED_STORAGE_KEY = "rubikPlaybackSpeed";
 const SHARE_PARAM = "case";
+const SHARE_PAYLOAD_VERSION = "v2";
+const MOVE_CODE_ALPHABET = "0123456789ABCDEFGH";
+const MOVE_TOKENS = FACE_ORDER.flatMap((face) => [face, `${face}'`, `${face}2`]);
+const MOVE_TO_CODE = new Map(MOVE_TOKENS.map((move, index) => [move, MOVE_CODE_ALPHABET[index]]));
+const CODE_TO_MOVE = new Map(MOVE_TOKENS.map((move, index) => [MOVE_CODE_ALPHABET[index], move]));
+const COLOR_TO_CODE = new Map(COLORS.map((color, index) => [color, String(index)]));
+const CODE_TO_COLOR = new Map(COLORS.map((color, index) => [String(index), color]));
+const QUALITY_TO_CODE = {
+  fast: "f",
+  tighter: "t",
+  god20: "g",
+};
+const CODE_TO_QUALITY = {
+  f: { quality: "fast", qualityLabel: "Fast" },
+  t: { quality: "tighter", qualityLabel: "Tighter" },
+  g: { quality: "god20", qualityLabel: "Try 20" },
+};
 
 let reviewedFaces = null;
 let cubeFaces = null;
@@ -1034,13 +1051,10 @@ async function shareSolutionLink() {
   if (!hasShareableSolution()) return;
   const url = createShareUrl();
   const title = "Rubik Solver solution";
-  const text = currentScramble.length
-    ? `Rubik scramble: ${currentScramble.join(" ")}`
-    : `Rubik solution: ${formatMoves(solutionMoves)}`;
 
   try {
     if (navigator.share) {
-      await navigator.share({ title, text, url });
+      await navigator.share({ title, url });
       window.history.replaceState(null, "", url);
       setStatus("Share sheet opened");
       setShareFeedback("Share link ready.", url);
@@ -1112,15 +1126,18 @@ function formatMoves(moves) {
 }
 
 function createShareUrl() {
-  const payload = {
-    v: 1,
-    faces: reviewedFaces,
-    moves: solutionMoves,
-    scramble: currentScramble,
-    solve: activeSolveMetadata,
-  };
-  const encoded = encodeBase64Url(JSON.stringify(payload));
+  const encoded = createCompactSharePayload();
   return `${window.location.origin}${window.location.pathname}${window.location.search}#${SHARE_PARAM}=${encoded}`;
+}
+
+function createCompactSharePayload() {
+  return [
+    SHARE_PAYLOAD_VERSION,
+    encodeFacesCompact(reviewedFaces),
+    encodeMovesCompact(solutionMoves),
+    encodeMovesCompact(currentScramble),
+    QUALITY_TO_CODE[activeSolveMetadata?.quality] || "",
+  ].join(".");
 }
 
 function clearShareHash() {
@@ -1136,7 +1153,7 @@ function clearShareHash() {
 async function restoreSharedSolutionFromHash() {
   const payload = sharedPayloadFromHash();
   if (!payload) return;
-  if (payload.v !== 1 || !payload.faces || !Array.isArray(payload.moves)) {
+  if (![1, 2].includes(payload.v) || !payload.faces || !Array.isArray(payload.moves)) {
     setStatus("Shared link is not valid", true);
     return;
   }
@@ -1181,10 +1198,86 @@ async function restoreSharedSolutionFromHash() {
 function sharedPayloadFromHash() {
   if (!window.location.hash) return null;
   const params = new URLSearchParams(window.location.hash.slice(1));
-  const encoded = params.get(SHARE_PARAM);
+  const encoded = cleanShareValue(params.get(SHARE_PARAM));
   if (!encoded) return null;
+  if (encoded.startsWith(`${SHARE_PAYLOAD_VERSION}.`)) {
+    return parseCompactSharePayload(encoded);
+  }
+
   try {
-    return JSON.parse(decodeBase64Url(encoded));
+    return JSON.parse(decodeBase64Url(legacyBase64ShareValue(encoded)));
+  } catch (_error) {
+    return { v: null };
+  }
+}
+
+function cleanShareValue(value) {
+  return (value || "").trim().split(/\s+/)[0];
+}
+
+function legacyBase64ShareValue(value) {
+  return (value.match(/^[A-Za-z0-9_-]+/) || [""])[0];
+}
+
+function encodeFacesCompact(faces) {
+  return FACE_ORDER.map((face) =>
+    faces[face]
+      .map((color) => {
+        const code = COLOR_TO_CODE.get(color);
+        if (code === undefined) throw new Error(`Cannot encode color: ${color}`);
+        return code;
+      })
+      .join("")
+  ).join("");
+}
+
+function decodeFacesCompact(value) {
+  if (!/^[0-5]{54}$/.test(value)) throw new Error("Invalid compact face data");
+  const faces = {};
+  let cursor = 0;
+  FACE_ORDER.forEach((face) => {
+    faces[face] = value
+      .slice(cursor, cursor + 9)
+      .split("")
+      .map((code) => CODE_TO_COLOR.get(code));
+    cursor += 9;
+  });
+  return faces;
+}
+
+function encodeMovesCompact(moves) {
+  return (moves || [])
+    .map((move) => {
+      const code = MOVE_TO_CODE.get(move);
+      if (code === undefined) throw new Error(`Cannot encode move: ${move}`);
+      return code;
+    })
+    .join("");
+}
+
+function decodeMovesCompact(value) {
+  if (!/^[0-9A-H]*$/.test(value)) throw new Error("Invalid compact move data");
+  return value.split("").map((code) => CODE_TO_MOVE.get(code));
+}
+
+function parseCompactSharePayload(value) {
+  try {
+    const [version, faces, moves, scramble = "", qualityCode = ""] = value.split(".");
+    if (version !== SHARE_PAYLOAD_VERSION || !faces || moves === undefined) return { v: null };
+    const quality = CODE_TO_QUALITY[qualityCode];
+    const decodedMoves = decodeMovesCompact(moves);
+    return {
+      v: 2,
+      faces: decodeFacesCompact(faces),
+      moves: decodedMoves,
+      scramble: decodeMovesCompact(scramble),
+      solve: {
+        ...(quality || { quality: "shared", qualityLabel: "Shared" }),
+        usedFallback: false,
+        attempts: [],
+        message: `Shared solution loaded (${decodedMoves.length} moves).`,
+      },
+    };
   } catch (_error) {
     return { v: null };
   }

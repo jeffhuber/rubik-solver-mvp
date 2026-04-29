@@ -15,7 +15,7 @@ After detection, the app shows sticker counts, center validation, low-confidence
 
 Parser fixtures are downloaded as self-contained JSON files containing the original image data URL, detected faces, corrected/expected faces, diagnostics, grid metadata, and debug overlay. They are intended for capturing real parsing edge cases; placing them under `tests/fixtures/parser/` promotes them into smoke-test regression fixtures.
 
-Solution sharing is stateless: the share action creates a URL fragment containing the reviewed starting state, solution moves, optional generated scramble, and solver metadata. Opening that link reconstructs the solution through `/api/replay`; no database-backed saved cases are required.
+Solution sharing is stateless: the share action creates a compact URL fragment containing the reviewed starting state, solution moves, optional generated scramble, and solver quality. Opening that link reconstructs the solution through `/api/replay`; no database-backed saved cases are required.
 
 ## Local Development
 
