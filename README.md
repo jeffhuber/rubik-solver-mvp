@@ -5,7 +5,7 @@ Production: [https://rubik-solver-mvp-production.up.railway.app](https://rubik-s
 A Railway-ready web MVP for solving a Rubik's Cube from either:
 
 - a randomly generated scramble, or
-- a Ruwix-style flattened six-face cube net screenshot.
+- a Ruwix-style or separated-sticker flattened six-face cube net screenshot.
 
 The app intentionally starts with structured cube-net images rather than arbitrary cube photos. That keeps the first vision milestone deterministic: all 54 stickers are visible, aligned, and reviewable before solving.
 

@@ -142,7 +142,8 @@ def detect_grid_lines(image: np.ndarray) -> Tuple[List[float], List[float]]:
 
 
 def detect_grid_lines_with_debug(image: np.ndarray) -> GridDetection:
-    for candidate_image, source, crop in _grid_detection_candidates(image):
+    candidates = list(_grid_detection_candidates(image))
+    for candidate_image, source, crop in candidates:
         try:
             x_lines, y_lines = _detect_grid_lines_in_image(candidate_image)
         except NetParseError:
@@ -156,8 +157,25 @@ def detect_grid_lines_with_debug(image: np.ndarray) -> GridDetection:
             crop=crop,
         )
 
+    for candidate_image, source, crop in candidates:
+        try:
+            x_lines, y_lines = _detect_separated_edge_lines_in_image(candidate_image)
+        except NetParseError:
+            try:
+                x_lines, y_lines = _detect_separated_sticker_lines_in_image(candidate_image)
+            except NetParseError:
+                continue
+        offset_x = crop["x"]
+        offset_y = crop["y"]
+        return GridDetection(
+            x_lines=[line + offset_x for line in x_lines],
+            y_lines=[line + offset_y for line in y_lines],
+            source=f"{source}-separated-stickers",
+            crop=crop,
+        )
+
     raise NetParseError(
-        "Could not detect a 12x9 flattened cube net. Try a cleaner Ruwix-style screenshot."
+        "Could not detect a 12x9 flattened cube net. Try a cleaner flattened-net screenshot."
     )
 
 
@@ -354,6 +372,201 @@ def _looks_like_cube_net(mask: np.ndarray, x_lines: Sequence[float], y_lines: Se
         if np.count_nonzero(region) < min_dark_pixels:
             return False
     return True
+
+
+def _detect_separated_edge_lines_in_image(image: np.ndarray) -> Tuple[List[float], List[float]]:
+    base_mask = cv2.inRange(image, np.array([0, 0, 0]), np.array([75, 75, 75]))
+    relaxed_mask = cv2.inRange(image, np.array([0, 0, 0]), np.array([95, 95, 95]))
+    gray_mask = cv2.inRange(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 0, 135)
+    height, width = base_mask.shape
+
+    for mask in (base_mask, relaxed_mask, gray_mask):
+        x_edges = _axis_line_centers(mask, axis=0, min_coverage=max(50, height * 0.06))
+        y_edges = _axis_line_centers(mask, axis=1, min_coverage=max(50, width * 0.06))
+        x_centers = _paired_edge_centers(x_edges, expected_count=12)
+        y_centers = _paired_edge_centers(y_edges, expected_count=9)
+        if x_centers is None or y_centers is None:
+            continue
+        x_lines = _lines_from_centers(x_centers)
+        y_lines = _lines_from_centers(y_centers)
+        if _looks_like_cube_net(mask, x_lines, y_lines):
+            return x_lines, y_lines
+
+    raise NetParseError("Could not infer separated sticker grid edges.")
+
+
+def _paired_edge_centers(edges: Sequence[float], expected_count: int) -> List[float]:
+    if len(edges) < expected_count * 2:
+        return None
+
+    edges = sorted(edges)
+    best = None
+    best_score = float("inf")
+    window_size = expected_count * 2
+    for start in range(0, len(edges) - window_size + 1):
+        window = edges[start : start + window_size]
+        pairs = [(window[index], window[index + 1]) for index in range(0, window_size, 2)]
+        widths = np.array([right - left for left, right in pairs], dtype=np.float32)
+        if np.any(widths < 5):
+            continue
+        centers = [(left + right) / 2 for left, right in pairs]
+        if not _evenly_spaced(centers):
+            continue
+        gaps = np.array(
+            [pairs[index + 1][0] - pairs[index][1] for index in range(len(pairs) - 1)],
+            dtype=np.float32,
+        )
+        median_width = float(np.median(widths))
+        if median_width <= 0 or np.any(gaps < -median_width * 0.15):
+            continue
+        if len(gaps) and np.median(gaps) > median_width * 0.55:
+            continue
+        score = float(np.std(widths) + np.std(np.diff(centers)))
+        if score < best_score:
+            best_score = score
+            best = centers
+
+    return [float(value) for value in best] if best is not None else None
+
+
+def _detect_separated_sticker_lines_in_image(image: np.ndarray) -> Tuple[List[float], List[float]]:
+    boxes = _separated_sticker_boxes(image)
+    if len(boxes) < 54:
+        raise NetParseError("Could not find enough separated sticker boxes.")
+
+    median_size = float(np.median([min(box[2], box[3]) for box in boxes]))
+    merge_tolerance = max(3.0, median_size * 0.25)
+    x_centers = _cluster_axis_values(
+        [box[0] + box[2] / 2 for box in boxes], expected_count=12, tolerance=merge_tolerance
+    )
+    y_centers = _cluster_axis_values(
+        [box[1] + box[3] / 2 for box in boxes], expected_count=9, tolerance=merge_tolerance
+    )
+    if x_centers is None or y_centers is None:
+        raise NetParseError("Could not cluster separated stickers into a 12x9 net.")
+
+    pitch_x = _median_pitch(x_centers)
+    pitch_y = _median_pitch(y_centers)
+    if pitch_x <= 0 or pitch_y <= 0:
+        raise NetParseError("Separated sticker grid spacing is invalid.")
+
+    slots = _occupied_net_slots()
+    assigned = {}
+    max_distance = max(pitch_x, pitch_y) * 0.36
+    for box in boxes:
+        center_x = box[0] + box[2] / 2
+        center_y = box[1] + box[3] / 2
+        grid_x, distance_x = _nearest_index(center_x, x_centers)
+        grid_y, distance_y = _nearest_index(center_y, y_centers)
+        if (grid_x, grid_y) not in slots:
+            continue
+        distance = float(np.hypot(distance_x, distance_y))
+        if distance > max_distance:
+            continue
+        current = assigned.get((grid_x, grid_y))
+        if current is None or distance < current[0]:
+            assigned[(grid_x, grid_y)] = (distance, box)
+
+    if len(assigned) != len(slots):
+        raise NetParseError("Separated sticker net is missing expected sticker positions.")
+
+    return _lines_from_centers(x_centers), _lines_from_centers(y_centers)
+
+
+def _separated_sticker_boxes(image: np.ndarray) -> List[Tuple[int, int, int, int]]:
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    saturated = hsv[:, :, 1] > 45
+    dark_or_edge = gray < 225
+    mask = np.where(saturated | dark_or_edge, 255, 0).astype(np.uint8)
+
+    count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    preliminary = []
+    image_area = image.shape[0] * image.shape[1]
+    for label in range(1, count):
+        x, y, width, height, area = stats[label]
+        if area < max(20, image_area * 0.00008):
+            continue
+        if width < 8 or height < 8:
+            continue
+        aspect = width / max(height, 1)
+        if not 0.55 <= aspect <= 1.8:
+            continue
+        preliminary.append((int(x), int(y), int(width), int(height)))
+
+    if len(preliminary) < 54:
+        return preliminary
+
+    sizes = np.array([max(width, height) for _x, _y, width, height in preliminary])
+    median_size = float(np.median(sizes))
+    min_size = median_size * 0.55
+    max_size = median_size * 1.65
+    return [
+        box
+        for box in preliminary
+        if min_size <= max(box[2], box[3]) <= max_size
+        and min_size <= min(box[2], box[3]) <= max_size
+    ]
+
+
+def _cluster_axis_values(
+    values: Sequence[float], expected_count: int, tolerance: float
+) -> List[float]:
+    if len(values) < expected_count:
+        return None
+
+    groups = []
+    for value in sorted(values):
+        if not groups or abs(value - float(np.mean(groups[-1]))) > tolerance:
+            groups.append([value])
+        else:
+            groups[-1].append(value)
+
+    if len(groups) != expected_count:
+        return None
+
+    centers = [float(np.mean(group)) for group in groups]
+    if not _evenly_spaced(centers):
+        return None
+    return centers
+
+
+def _evenly_spaced(values: Sequence[float]) -> bool:
+    if len(values) < 2:
+        return False
+    diffs = np.diff(sorted(values))
+    median = float(np.median(diffs))
+    if median <= 0:
+        return False
+    tolerance = max(5.0, median * 0.22)
+    return bool(np.all(np.abs(diffs - median) <= tolerance))
+
+
+def _median_pitch(values: Sequence[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    return float(np.median(np.diff(sorted(values))))
+
+
+def _lines_from_centers(centers: Sequence[float]) -> List[float]:
+    centers = sorted(centers)
+    pitch = _median_pitch(centers)
+    return [float(centers[0] - pitch / 2 + index * pitch) for index in range(len(centers) + 1)]
+
+
+def _nearest_index(value: float, centers: Sequence[float]) -> Tuple[int, float]:
+    distances = [abs(value - center) for center in centers]
+    index = int(np.argmin(distances))
+    return index, float(distances[index])
+
+
+def _occupied_net_slots():
+    slots = set()
+    for grid_x, grid_y in FACE_NET_POSITIONS.values():
+        for row in range(3):
+            for col in range(3):
+                slots.add((grid_x + col, grid_y + row))
+    return slots
 
 
 def sample_stickers(

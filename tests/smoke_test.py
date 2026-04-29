@@ -46,6 +46,14 @@ def main() -> int:
         raise AssertionError("Parser debug overlay was not returned as a PNG data URL.")
     print("Detection source:", margin_parsed["debug"]["detectionSource"])
 
+    print("\nSeparated-sticker parser regression test")
+    separated_parsed = parse_bgr_image(render_separated_sticker_net(faces), include_debug_image=True)
+    if separated_parsed["faces"] != faces:
+        raise AssertionError("Separated-sticker parser did not recover the rendered cube state.")
+    if "separated-stickers" not in separated_parsed["debug"]["detectionSource"]:
+        raise AssertionError("Separated-sticker parser did not use the separated fallback.")
+    print("Detection source:", separated_parsed["debug"]["detectionSource"])
+
     run_parser_fixture_tests()
 
     print("\nSolver quality smoke test")
@@ -169,6 +177,31 @@ def render_large_margin_net(faces):
         dtype=np.uint8,
     )
     image[margin_top : margin_top + net.shape[0], margin_left : margin_left + net.shape[1]] = net
+    return image
+
+
+def render_separated_sticker_net(faces):
+    cell = 39
+    sticker = 31
+    pad_x = 12
+    pad_y = 16
+    width = pad_x * 2 + cell * 12
+    height = pad_y * 2 + cell * 9
+    image = np.full((height, width, 3), 255, dtype=np.uint8)
+
+    for face, (grid_x, grid_y) in FACE_NET_POSITIONS.items():
+        for row in range(3):
+            for col in range(3):
+                index = row * 3 + col
+                x0 = pad_x + (grid_x + col) * cell
+                y0 = pad_y + (grid_y + row) * cell
+                x1 = x0 + sticker
+                y1 = y0 + sticker
+                rgb = COLOR_RGB[faces[face][index]]
+                bgr = (rgb[2], rgb[1], rgb[0])
+                cv2.rectangle(image, (x0, y0), (x1, y1), (80, 80, 80), thickness=1)
+                cv2.rectangle(image, (x0 + 2, y0 + 2), (x1 - 2, y1 - 2), bgr, thickness=-1)
+
     return image
 
 
